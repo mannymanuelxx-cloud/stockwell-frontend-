@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#25243A">
+    <meta name="description" content="Shop Stockwell products or manage inventory and business operations">
+    <title>Stockwell | Store &amp; Inventory</title>
+    <link rel="icon" type="image/svg+xml" href="stockwell-mark.svg?v=20261102-2">
+    <link rel="stylesheet" href="styles.css?v=20261106-8">
+    <script src="vendor/vue.global.prod.js?v=3.5.28" defer></script>
+    <script src="app.js?v=20261106-12" defer></script>
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="sidebar" aria-label="Main navigation">
+            <a class="brand" href="#dashboard" aria-label="Stockwell home">
+                <img class="brand-mark" src="stockwell-mark.svg" alt="">
+                <span><strong>Stockwell</strong><small>Inventory &amp; operations</small></span>
+            </a>
+
+            <p class="nav-label">YOUR BUSINESS</p>
+            <nav class="nav-list">
+                <a class="nav-link" href="#dashboard" data-route="dashboard"><span class="nav-icon" data-icon="overview" aria-hidden="true"></span>Overview</a>
+                <a class="nav-link" href="#inventory" data-route="inventory"><span class="nav-icon" data-icon="products" aria-hidden="true"></span>Products <span id="product-nav-count" class="nav-count">0</span><span id="low-stock-notification-count" class="nav-count low-stock-notification-count" role="status" aria-live="polite" aria-label="Low stock products" hidden></span></a>
+                <a class="nav-link" href="#sales" data-route="sales"><span class="nav-icon" data-icon="sales" aria-hidden="true"></span>Sales</a>
+                <a class="nav-link" href="#orders" data-route="orders"><span class="nav-icon" data-icon="orders" aria-hidden="true"></span>Orders <span id="orders-notification-count" class="nav-count" role="status" aria-live="polite" aria-label="Pending orders" hidden></span></a>
+                <a class="nav-link" href="#returns" data-route="returns"><span class="nav-icon" data-icon="orders" aria-hidden="true"></span>Returns &amp; refunds <span id="returns-notification-count" class="nav-count return-notification-count" role="status" aria-live="polite" aria-label="Pending return requests" hidden></span></a>
+                <a class="nav-link" href="#delivery-settings" data-route="delivery-settings"><span class="nav-icon" data-icon="purchases" aria-hidden="true"></span>Delivery settings</a>
+                <a class="nav-link" href="#purchases" data-route="purchases"><span class="nav-icon" data-icon="purchases" aria-hidden="true"></span>Purchases</a>
+                <a class="nav-link" href="#customers" data-route="customers"><span class="nav-icon" data-icon="customers" aria-hidden="true"></span>Customers</a>
+                <a class="nav-link" href="#suppliers" data-route="suppliers"><span class="nav-icon" data-icon="suppliers" aria-hidden="true"></span>Suppliers</a>
+                <a class="nav-link" href="#reports" data-route="reports"><span class="nav-icon" data-icon="reports" aria-hidden="true"></span>Reports</a>
+                <a class="nav-link" href="#activity" data-route="activity" hidden><span class="nav-icon" data-icon="activity" aria-hidden="true"></span>Activity history</a>
+                <a class="nav-link" href="#users" data-route="users" hidden><span class="nav-icon" data-icon="customers" aria-hidden="true"></span>Users &amp; access</a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <span id="connection-dot" class="status-dot" aria-hidden="true"></span>
+                <span><strong>System status</strong><small id="connection-label">Checking connection…</small></span>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <header class="topbar">
+                <div class="mobile-brand"><img class="brand-mark" src="stockwell-mark.svg" alt=""><strong>Stockwell</strong></div>
+                <div class="breadcrumb"><span>Workspace</span><span class="crumb-divider">/</span><strong id="breadcrumb-current">Overview</strong></div>
+                <div class="topbar-right">
+                    <span class="today-label" id="today-label"></span>
+                    <span id="account-name" class="account-name">Account</span>
+                    <button class="signout-button" type="button" data-logout>Sign out</button>
+                </div>
+            </header>
+            <div id="app" class="page-content" aria-live="polite"></div>
+            <footer class="page-footer">Stockwell <span>·</span> Inventory &amp; Business Operations</footer>
+        </main>
+    </div>
+
+    <div id="modal-root"></div>
+    <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>
