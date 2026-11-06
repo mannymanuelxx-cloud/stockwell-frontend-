@@ -1,4 +1,8 @@
-const API_ROOT = "../backend/api";
+const API_ROOT = window.STOCKWELL_API_ROOT || (
+    window.location.hostname.endsWith(".onrender.com")
+        ? "https://stockwell-api-nlyi.onrender.com/api"
+        : "../backend/api"
+);
 const API_PRODUCTS = `${API_ROOT}/products`;
 const API_AUTH = `${API_ROOT}/auth`;
 const app = document.querySelector("#app");
