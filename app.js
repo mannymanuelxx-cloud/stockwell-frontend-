@@ -2171,7 +2171,7 @@ async function request(url, options = {}) {
     }
     const response = await fetch(url, {
         ...options,
-        credentials: "same-origin",
+        credentials: "include",
         headers
     });
     if (response.status === 204) return null;
@@ -2392,7 +2392,7 @@ async function openProductModal(product = null) {
             const response = await fetch(`${API_PRODUCTS}/${encodeURIComponent(product.id)}/image`, {
                 method: "POST",
                 body: uploadData,
-                credentials: "same-origin",
+                credentials: "include",
                 headers: csrfToken ? { "X-CSRF-Token": csrfToken } : {}
             });
             let result;
