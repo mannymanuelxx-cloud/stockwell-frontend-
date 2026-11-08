@@ -32,6 +32,9 @@ let businessReport = null;
 let businessError = "";
 let reportDateRange = null;
 let authMode = "login";
+let googleAuthError = new URLSearchParams(window.location.search).get("auth_error") === "google"
+    ? "Google sign-in could not be completed. Try again or use your Stockwell username and password."
+    : "";
 let csrfToken = "";
 let shopProducts = [];
 let shopDeliveryZones = [];
@@ -1373,9 +1376,11 @@ function renderLogin(errorMessage = "") {
             <p class="login-intro">${registering ? "Create an account to shop Stockwell and track your orders." : recovering ? "Enter the email address linked to your Stockwell account. If it matches, we’ll email a reset link. If no email arrives after a few minutes, check Spam/Junk, confirm the account email, and wait 60 seconds before retrying." : "Sign in as a customer to shop, or as staff or an administrator to manage store operations."}</p>
             <form id="${registering ? "register-form" : recovering ? "forgot-password-form" : "login-form"}" novalidate>
                 ${fields}
-                <p class="login-error" role="alert">${escapeHtml(errorMessage)}</p>
+                <p class="login-error" role="alert">${escapeHtml(errorMessage || (!registering && !recovering ? googleAuthError : ""))}</p>
                 <button class="button login-submit" type="submit">${registering ? "Create account" : recovering ? "Send reset link" : "Sign in"} <span aria-hidden="true">→</span></button>
             </form>
+            ${!registering && !recovering ? `<div class="login-divider" aria-hidden="true"><span>OR</span></div>
+                <a class="google-login-button" href="${escapeHtml(API_AUTH)}/google/start"><span class="google-login-mark" aria-hidden="true">G</span>Continue with Google</a>` : ""}
             <p class="login-footnote">${registering ? "Already have an account?" : recovering ? "Remembered your password?" : "New to Stockwell?"}
                 <button class="auth-mode-button" type="button" data-auth-mode="${registering || recovering ? "login" : "register"}">${registering || recovering ? "Sign in" : "Create a customer account"}</button></p>
             ${!registering && !recovering ? '<p class="login-footnote"><button class="auth-mode-button" type="button" data-auth-mode="forgot">Forgot your password?</button></p>' : ""}
@@ -3178,6 +3183,7 @@ app.addEventListener("submit", async (event) => {
         currentUser = result.user;
         authStatus = "authenticated";
         authMode = "login";
+        googleAuthError = "";
         window.location.hash = currentUser.role === "customer" ? "#shop" : "#dashboard";
         render();
         if (currentUser.role !== "customer"
