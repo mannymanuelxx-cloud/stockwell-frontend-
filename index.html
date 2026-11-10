@@ -52,11 +52,18 @@
                 </div>
             </header>
             <div id="app" class="page-content" aria-live="polite"></div>
-            <footer class="page-footer">Stockwell <span>·</span> Inventory &amp; Business Operations</footer>
+            <footer class="page-footer">Stockwell <span>·</span> Inventory &amp; Business Operations <button class="privacy-settings-button" type="button" data-analytics-settings hidden>Privacy choices</button></footer>
         </main>
     </div>
 
     <div id="modal-root"></div>
     <div id="toast-region" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <aside id="analytics-consent" class="analytics-consent" aria-label="Analytics preference" hidden>
+        <p>May basic page-view analytics ba? Stockwell will only share which page is open after you allow it; hindi isi-share ang pangalan, email, address, order details, o password.</p>
+        <div class="analytics-consent-actions">
+            <button class="button secondary" type="button" data-analytics-consent="reject">No thanks</button>
+            <button class="button" type="button" data-analytics-consent="accept">Allow analytics</button>
+        </div>
+    </aside>
 </body>
 </html>

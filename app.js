@@ -32,6 +32,12 @@ let businessReport = null;
 let businessError = "";
 let reportDateRange = null;
 let authMode = "login";
+let publicIntegrationsConfig = null;
+let turnstileToken = "";
+let turnstileWidgetId = null;
+let turnstileScriptPromise = null;
+let analyticsConsent = "";
+let analyticsInitialized = false;
 let googleAuthError = new URLSearchParams(window.location.search).get("auth_error") === "google"
     ? "Google sign-in could not be completed. Try again or use your Stockwell username and password."
     : "";
@@ -879,7 +885,7 @@ function renderReports() {
     const purchases = report.purchases || {};
     const profit = report.profit || {};
     const stock = report.stock || {};
-    renderMarkup(`${businessPageHeading("reports", '<div class="page-actions"><button class="button secondary" type="button" data-export-report>Export CSV</button><button class="button secondary" type="button" data-print-report>Print summary / PDF</button></div>')}
+    renderMarkup(`${businessPageHeading("reports", '<div class="page-actions"><button class="button secondary" type="button" data-export-report>CSV for Google Sheets</button><button class="button secondary" type="button" data-print-report>Print summary / PDF</button></div>')}
         <form class="report-filter content-card" id="report-filter">
             <div class="form-group"><label for="report-start">From</label><input class="form-field" type="date" id="report-start" name="start" value="${escapeHtml(reportDateRange?.start || firstDay)}" required></div>
             <div class="form-group"><label for="report-end">To</label><input class="form-field" type="date" id="report-end" name="end" value="${escapeHtml(reportDateRange?.end || today)}" required></div>
@@ -890,6 +896,7 @@ function renderReports() {
                 <button class="button secondary" type="button" data-report-range="month">This month</button>
             </div>
         </form>
+        <p class="product-description">Download the report as CSV, then import it into Google Sheets using File → Import. No Google account connection or automatic data sync is used.</p>
         ${businessStatus === "loading" ? '<div class="content-card loading">Loading report data…</div>' : ""}
         <section class="stat-grid report-stat-grid">
             <article class="stat-card"><div class="stat-top"><span>Sales revenue</span></div><div class="stat-value">${money(sales.total)}</div><div class="stat-note">${Number(sales.count) || 0} sales in period</div></article>
@@ -1376,6 +1383,7 @@ function renderLogin(errorMessage = "") {
             <p class="login-intro">${registering ? "Create an account to shop Stockwell and track your orders." : recovering ? "Enter the email address linked to your Stockwell account. If it matches, we’ll email a reset link. If no email arrives after a few minutes, check Spam/Junk, confirm the account email, and wait 60 seconds before retrying." : "Sign in as a customer to shop, or as staff or an administrator to manage store operations."}</p>
             <form id="${registering ? "register-form" : recovering ? "forgot-password-form" : "login-form"}" novalidate>
                 ${fields}
+                ${registering && publicIntegrationsConfig?.turnstileSiteKey ? '<div class="form-group"><div id="registration-turnstile"></div><p class="login-error" id="turnstile-error" role="alert"></p></div>' : ""}
                 <p class="login-error" role="alert">${escapeHtml(errorMessage || (!registering && !recovering ? googleAuthError : ""))}</p>
                 <button class="button login-submit" type="submit">${registering ? "Create account" : recovering ? "Send reset link" : "Sign in"} <span aria-hidden="true">→</span></button>
             </form>
@@ -1386,7 +1394,179 @@ function renderLogin(errorMessage = "") {
             ${!registering && !recovering ? '<p class="login-footnote"><button class="auth-mode-button" type="button" data-auth-mode="forgot">Forgot your password?</button></p>' : ""}
         </div>
     </section>`);
-    nextTick(() => app.querySelector(registering ? "#register-firstname" : recovering ? "#forgot-email" : "#login-username")?.focus());
+    nextTick(() => {
+        app.querySelector(registering ? "#register-firstname" : recovering ? "#forgot-email" : "#login-username")?.focus();
+        if (registering && publicIntegrationsConfig?.turnstileSiteKey) renderRegistrationTurnstile();
+    });
+}
+
+function ensureTurnstileScript() {
+    if (window.turnstile) return Promise.resolve(window.turnstile);
+    if (turnstileScriptPromise) return turnstileScriptPromise;
+    turnstileScriptPromise = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+        script.async = true;
+        script.defer = true;
+        script.onload = () => window.turnstile ? resolve(window.turnstile) : reject(new Error("Cloudflare Turnstile did not initialize."));
+        script.onerror = () => reject(new Error("Could not load Cloudflare Turnstile."));
+        document.head.append(script);
+    }).catch((error) => {
+        turnstileScriptPromise = null;
+        throw error;
+    });
+    return turnstileScriptPromise;
+}
+
+async function renderRegistrationTurnstile() {
+    const container = app.querySelector("#registration-turnstile");
+    if (!container) return;
+    turnstileToken = "";
+    try {
+        const turnstile = await ensureTurnstileScript();
+        if (!container.isConnected) return;
+        if (turnstileWidgetId !== null) turnstile.remove(turnstileWidgetId);
+        turnstileWidgetId = turnstile.render(container, {
+            sitekey: publicIntegrationsConfig.turnstileSiteKey,
+            action: "customer_registration",
+            callback: (token) => {
+                turnstileToken = token;
+                const errorNode = app.querySelector("#turnstile-error");
+                if (errorNode) errorNode.textContent = "";
+            },
+            "expired-callback": () => {
+                turnstileToken = "";
+                const errorNode = app.querySelector("#turnstile-error");
+                if (errorNode) errorNode.textContent = "The security check expired. Please complete it again.";
+            },
+            "error-callback": () => {
+                turnstileToken = "";
+                const errorNode = app.querySelector("#turnstile-error");
+                if (errorNode) errorNode.textContent = "The security check could not load. Refresh the page and try again.";
+            }
+        });
+    } catch (error) {
+        const errorNode = app.querySelector("#turnstile-error");
+        if (errorNode) errorNode.textContent = error.message;
+    }
+}
+
+async function loadPublicIntegrationsConfig() {
+    try {
+        const response = await fetch(`${API_AUTH}/public-config`, {
+            credentials: "include",
+            headers: { Accept: "application/json" }
+        });
+        if (!response.ok) throw new Error(`Integration settings could not be loaded (${response.status}).`);
+        const result = await response.json();
+        const integrations = result?.integrations || {};
+        publicIntegrationsConfig = {
+            turnstileSiteKey: typeof integrations.turnstile_site_key === "string" ? integrations.turnstile_site_key : "",
+            ga4MeasurementId: typeof integrations.ga4_measurement_id === "string" ? integrations.ga4_measurement_id : ""
+        };
+        document.querySelector("[data-analytics-settings]").hidden = !publicIntegrationsConfig.ga4MeasurementId;
+        initializeAnalyticsConsent();
+        if (authMode === "register" && authStatus !== "authenticated") renderLogin();
+    } catch (error) {
+        publicIntegrationsConfig = { turnstileSiteKey: "", ga4MeasurementId: "" };
+        const settingsButton = document.querySelector("[data-analytics-settings]");
+        if (settingsButton) settingsButton.hidden = true;
+        if (authMode === "register" && authStatus !== "authenticated") {
+            renderLogin("Could not load registration security settings. Refresh the page and try again.");
+        }
+    }
+}
+
+function readAnalyticsConsent() {
+    try {
+        return localStorage.getItem("stockwell.analytics.consent") || "";
+    } catch {
+        return "";
+    }
+}
+
+function initializeAnalyticsConsent() {
+    if (!publicIntegrationsConfig?.ga4MeasurementId) return;
+    analyticsConsent = readAnalyticsConsent();
+    const banner = document.querySelector("#analytics-consent");
+    banner.hidden = analyticsConsent === "accepted" || analyticsConsent === "rejected";
+    if (analyticsConsent === "accepted") {
+        startGoogleAnalytics();
+        trackAnalyticsPageView();
+    }
+}
+
+function saveAnalyticsConsent(choice) {
+    if (!["accept", "reject"].includes(choice)) return;
+    analyticsConsent = choice === "accept" ? "accepted" : "rejected";
+    try {
+        localStorage.setItem("stockwell.analytics.consent", analyticsConsent);
+    } catch {
+        showToast("Your analytics choice could not be saved in this browser.", true);
+    }
+    document.querySelector("#analytics-consent").hidden = true;
+    if (analyticsConsent === "accepted") {
+        startGoogleAnalytics();
+        trackAnalyticsPageView();
+    } else if (analyticsInitialized) {
+        window.gtag("consent", "update", {
+            analytics_storage: "denied",
+            ad_storage: "denied",
+            ad_user_data: "denied",
+            ad_personalization: "denied"
+        });
+    }
+}
+
+function startGoogleAnalytics() {
+    const measurementId = publicIntegrationsConfig?.ga4MeasurementId;
+    if (!measurementId || analyticsConsent !== "accepted" || analyticsInitialized) return;
+
+    window.dataLayer = window.dataLayer || [];
+    window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
+    window.gtag("consent", "default", {
+        analytics_storage: "denied",
+        ad_storage: "denied",
+        ad_user_data: "denied",
+        ad_personalization: "denied"
+    });
+    window.gtag("consent", "update", {
+        analytics_storage: "granted",
+        ad_storage: "denied",
+        ad_user_data: "denied",
+        ad_personalization: "denied"
+    });
+    window.gtag("js", new Date());
+    window.gtag("config", measurementId, {
+        send_page_view: false,
+        allow_google_signals: false,
+        allow_ad_personalization_signals: false
+    });
+
+    const script = document.createElement("script");
+    script.async = true;
+    script.src = `https://www.googletagmanager.com/gtag/js?id=${encodeURIComponent(measurementId)}`;
+    document.head.append(script);
+    analyticsInitialized = true;
+}
+
+function trackAnalyticsPageView() {
+    if (!analyticsInitialized || analyticsConsent !== "accepted" || authStatus === "checking") return;
+    if (currentUser && currentUser.role !== "customer") return;
+    const route = currentUser
+        ? currentRoute()
+        : currentRoute() === "reset-password"
+            ? "reset-password"
+            : authMode === "register"
+                ? "register"
+                : authMode === "forgot"
+                    ? "forgot-password"
+                    : "login";
+    window.gtag("event", "page_view", {
+        page_title: `Stockwell | ${routeTitles[route] || "Store"}`,
+        page_path: `${window.location.pathname}#${route}`,
+        page_location: `${window.location.origin}${window.location.pathname}#${route}`
+    });
 }
 
 function renderResetPassword(errorMessage = "") {
@@ -2193,6 +2373,7 @@ async function request(url, options = {}) {
             authStatus = "unauthenticated";
             currentUser = null;
             render();
+            trackAnalyticsPageView();
         }
         throw error;
     }
@@ -2260,6 +2441,7 @@ async function checkSession() {
         if (currentUser?.role === "customer" && !["shop", "my-orders", "account", "returns", "reset-password"].includes(currentRoute())) window.location.hash = "#shop";
         if (currentUser?.role === "customer") restoreShopCart();
         render();
+        trackAnalyticsPageView();
         startReturnNotificationPolling();
         if (currentUser?.role !== "customer" && currentUser
             && hasAnyPermission(["inventory.manage", "sales.manage", "orders.manage", "purchases.manage"])) await loadProducts();
@@ -3004,7 +3186,9 @@ app.addEventListener("click", (event) => {
     const deleteUserButton = event.target.closest("[data-delete-user]");
     if (authModeButton) {
         authMode = authModeButton.dataset.authMode;
+        turnstileToken = "";
         renderLogin();
+        trackAnalyticsPageView();
     }
     if (event.target.closest("[data-reset-login]")) {
         authMode = "login";
@@ -3171,6 +3355,10 @@ app.addEventListener("submit", async (event) => {
         const isRegistration = form.id === "register-form";
         const formData = new FormData(form);
         const payload = Object.fromEntries(formData.entries());
+        if (isRegistration && publicIntegrationsConfig?.turnstileSiteKey) {
+            if (!turnstileToken) throw new Error("Complete the security check before creating your account.");
+            payload.turnstile_token = turnstileToken;
+        }
         if (!isRegistration) {
             payload.username = String(payload.username || "").trim();
             if (!payload.username || !payload.password) throw new Error("Enter your username and password.");
@@ -3190,6 +3378,10 @@ app.addEventListener("submit", async (event) => {
             && hasAnyPermission(["inventory.manage", "sales.manage", "orders.manage", "purchases.manage"])) await loadProducts();
     } catch (error) {
         errorNode.textContent = error.message;
+        if (form.id === "register-form" && turnstileWidgetId !== null && window.turnstile) {
+            turnstileToken = "";
+            window.turnstile.reset(turnstileWidgetId);
+        }
         submitButton.disabled = false;
     }
 });
@@ -3567,7 +3759,7 @@ document.addEventListener("submit", async (event) => {
     }
 });
 
-window.addEventListener("hashchange", () => { modalRoot.innerHTML = ""; render(); });
+window.addEventListener("hashchange", () => { modalRoot.innerHTML = ""; render(); trackAnalyticsPageView(); });
 document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && currentRoute() === "my-orders") {
         refreshCustomerOrders();
@@ -3581,5 +3773,12 @@ document.querySelector("#today-label").textContent = new Intl.DateTimeFormat("en
 }).format(new Date());
 
 if (!window.location.hash) window.location.hash = "#dashboard";
+document.querySelector("[data-analytics-settings]").addEventListener("click", () => {
+    if (publicIntegrationsConfig?.ga4MeasurementId) document.querySelector("#analytics-consent").hidden = false;
+});
+document.querySelectorAll("[data-analytics-consent]").forEach((button) => {
+    button.addEventListener("click", () => saveAnalyticsConsent(button.dataset.analyticsConsent));
+});
 render();
+loadPublicIntegrationsConfig();
 checkSession();
