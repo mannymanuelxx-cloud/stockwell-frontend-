@@ -224,8 +224,15 @@ function productIllustration(product) {
 }
 
 function productImageMarkup(product, className) {
-    const imageUrl = product.image_url || productIllustration(product);
+    const imageUrl = product.image_url ? resolveProductImageUrl(product.image_url) : productIllustration(product);
     return `<img class="${className}" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(product.product_name)}" loading="lazy">`;
+}
+
+function resolveProductImageUrl(imageUrl) {
+    const match = typeof imageUrl === "string"
+        ? imageUrl.match(/^\/(?:[A-Za-z0-9._-]+\/)*uploads\/products\/(product-\d{2}\.jpg|[a-f0-9]{32}\.jpg)$/i)
+        : null;
+    return match ? `${API_ROOT.replace(/\/api\/?$/, "")}/uploads/products/${match[1]}` : imageUrl;
 }
 
 function currentRoute() {
@@ -2540,6 +2547,8 @@ async function openProductModal(product = null) {
         </section>
     </div>`;
 
+    const imagePreview = modalRoot.querySelector("#product-image-preview");
+    if (product?.image_url && imagePreview) imagePreview.src = resolveProductImageUrl(product.image_url);
     const form = modalRoot.querySelector("#product-form");
     modalRoot.querySelector("#product-name").focus();
 
@@ -2591,7 +2600,7 @@ async function openProductModal(product = null) {
             if (!response.ok) throw new Error(result?.error || `Image upload failed (${response.status}).`);
             modalRoot.querySelector("#product-image-url").value = result.data.image_url || "";
             const preview = modalRoot.querySelector("#product-image-preview");
-            preview.src = result.data.image_url || "";
+            preview.src = result.data.image_url ? resolveProductImageUrl(result.data.image_url) : "";
             preview.hidden = !result.data.image_url;
             fileInput.value = "";
             showToast("Product photo uploaded.");
