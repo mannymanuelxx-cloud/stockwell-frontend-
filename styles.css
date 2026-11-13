@@ -958,7 +958,7 @@ tbody tr:hover { background: #fafbf8; }
 .order-timeline li small { display: block; margin-top: 5px; color: var(--teal); font-size: 9px; text-transform: none; }
 .timeline-current { color: var(--red); }
 .customer-gcash-payment { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin: 14px 0 18px; }
-.customer-gcash-payment img { width: min(220px, 100%); aspect-ratio: 1; object-fit: contain; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.customer-gcash-payment img { width: min(340px, 100%); max-width: 100%; aspect-ratio: 1; object-fit: contain; padding: 8px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
 .customer-gcash-payment p { margin: 8px 0; color: var(--navy); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .customer-gcash-payment + form { max-width: 440px; }
 
