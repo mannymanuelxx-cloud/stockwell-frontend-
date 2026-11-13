@@ -31,10 +31,11 @@ let businessParties = [];
 let businessReport = null;
 let businessError = "";
 let reportDateRange = null;
+let sheetsSyncing = false;
 let authMode = "login";
 let publicIntegrationsConfig = null;
-let turnstileToken = "";
 let manualGcashDetails = null;
+let turnstileToken = "";
 let turnstileWidgetId = null;
 let turnstileScriptPromise = null;
 let analyticsConsent = "";
@@ -893,7 +894,10 @@ function renderReports() {
     const purchases = report.purchases || {};
     const profit = report.profit || {};
     const stock = report.stock || {};
-    renderMarkup(`${businessPageHeading("reports", '<div class="page-actions"><button class="button secondary" type="button" data-export-report>CSV for Google Sheets</button><button class="button secondary" type="button" data-print-report>Print summary / PDF</button></div>')}
+    const syncButton = hasPermission("backup.manage")
+        ? `<button class="button" type="button" data-sync-sheets ${sheetsSyncing ? "disabled" : ""}>${sheetsSyncing ? "Syncing…" : "Sync to Google Sheets"}</button>`
+        : "";
+    renderMarkup(`${businessPageHeading("reports", `<div class="page-actions">${syncButton}<button class="button secondary" type="button" data-export-report>CSV for Google Sheets</button><button class="button secondary" type="button" data-print-report>Print summary / PDF</button></div>`)}
         <form class="report-filter content-card" id="report-filter">
             <div class="form-group"><label for="report-start">From</label><input class="form-field" type="date" id="report-start" name="start" value="${escapeHtml(reportDateRange?.start || firstDay)}" required></div>
             <div class="form-group"><label for="report-end">To</label><input class="form-field" type="date" id="report-end" name="end" value="${escapeHtml(reportDateRange?.end || today)}" required></div>
@@ -904,7 +908,7 @@ function renderReports() {
                 <button class="button secondary" type="button" data-report-range="month">This month</button>
             </div>
         </form>
-        <p class="product-description">Download the report as CSV, then import it into Google Sheets using File → Import. No Google account connection or automatic data sync is used.</p>
+        <p class="product-description">Manual sync replaces only the dedicated Stockwell Sales, Stockwell Orders, and Stockwell Inventory tabs. Sales and orders use the selected date range; inventory shows current stock. Customer contact and delivery details are not exported.</p>
         ${businessStatus === "loading" ? '<div class="content-card loading">Loading report data…</div>' : ""}
         <section class="stat-grid report-stat-grid">
             <article class="stat-card"><div class="stat-top"><span>Sales revenue</span></div><div class="stat-value">${money(sales.total)}</div><div class="stat-note">${Number(sales.count) || 0} sales in period</div></article>
@@ -941,6 +945,34 @@ function loadReportRange(preset)
     reportDateRange = { start: dateInputValue(start), end: dateInputValue(end) };
     businessStatus = "idle";
     loadBusiness("reports", `?start=${encodeURIComponent(reportDateRange.start)}&end=${encodeURIComponent(reportDateRange.end)}`);
+}
+
+async function syncGoogleSheets(button) {
+    const now = new Date();
+    const defaultStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+    const defaultEnd = dateInputValue(now);
+    const start = document.querySelector("#report-start")?.value || reportDateRange?.start || defaultStart;
+    const end = document.querySelector("#report-end")?.value || reportDateRange?.end || defaultEnd;
+    if (!start || !end || start > end) {
+        showToast("Choose a valid report date range before syncing.", true);
+        return;
+    }
+    sheetsSyncing = true;
+    button.disabled = true;
+    button.textContent = "Syncing…";
+    try {
+        const result = await request(`${API_ROOT}/integrations/google-sheets/sync`, {
+            method: "POST",
+            body: JSON.stringify({ start, end })
+        });
+        const counts = result?.data?.rows || {};
+        showToast(`Google Sheets updated: ${counts["Stockwell Sales"] ?? 0} sales, ${counts["Stockwell Orders"] ?? 0} orders, ${counts["Stockwell Inventory"] ?? 0} products.`);
+    } catch (error) {
+        showToast(error.message, true);
+    } finally {
+        sheetsSyncing = false;
+        if (currentRoute() === "reports") renderReports();
+    }
 }
 
 function printReportSummary()
@@ -1478,6 +1510,12 @@ async function loadPublicIntegrationsConfig() {
                 ? integrations.manual_gcash
                 : null
         };
+        manualGcashDetails = publicIntegrationsConfig.manualGcash;
+        const paymentSelect = app.querySelector("#checkout-payment-method");
+        if (paymentSelect && manualGcashDetails
+            && !paymentSelect.querySelector('option[value="gcash"]')) {
+            paymentSelect.add(new Option("GCash QR / manual transfer", "gcash"));
+        }
         document.querySelector("[data-analytics-settings]").hidden = !publicIntegrationsConfig.ga4MeasurementId;
         initializeAnalyticsConsent();
         if (authMode === "register" && authStatus !== "authenticated") renderLogin();
@@ -1511,12 +1549,6 @@ function initializeAnalyticsConsent() {
     }
 }
 
-        manualGcashDetails = publicIntegrationsConfig.manualGcash;
-        const paymentSelect = app.querySelector("#checkout-payment-method");
-        if (paymentSelect && manualGcashDetails
-            && !paymentSelect.querySelector('option[value="gcash"]')) {
-            paymentSelect.add(new Option("GCash QR / manual transfer", "gcash"));
-        }
 function saveAnalyticsConsent(choice) {
     if (!["accept", "reject"].includes(choice)) return;
     analyticsConsent = choice === "accept" ? "accepted" : "rejected";
@@ -2002,6 +2034,10 @@ async function showCustomerOrderDetails(id)
         const order = result.data;
         const steps = ["pending", "processing", "ready_to_ship", "shipped", "delivered"];
         const cancelled = order.status === "cancelled";
+        const showManualGcash = order.payment_method === "gcash"
+            && order.payment_status === "unpaid"
+            && !cancelled
+            && manualGcashDetails;
         const statusIndex = order.status === "completed" ? steps.length - 1 : steps.indexOf(order.status);
         const timeline = cancelled
             ? `<ol class="order-timeline"><li class="timeline-current"><strong>Cancelled</strong><small>Stock reservation released</small></li></ol>`
@@ -2039,13 +2075,35 @@ async function showCustomerOrderDetails(id)
         modalRoot.querySelector("[data-order-modal-backdrop]").addEventListener("click", (event) => {
             if (event.target === event.currentTarget) closeBusinessModal();
         });
-        const showManualGcash = order.payment_method === "gcash"
-            && order.payment_status === "unpaid"
-            && !cancelled
-            && manualGcashDetails;
     } catch (error) {
         closeBusinessModal();
         showToast(error.message, true);
+    }
+}
+
+async function submitCustomerGcashReference(form)
+{
+    const reference = String(new FormData(form).get("reference") || "").trim();
+    const errorNode = form.querySelector("#gcash-reference-error");
+    const button = form.querySelector('[type="submit"]');
+    if (reference.length < 6 || reference.length > 100) {
+        errorNode.textContent = "Enter a transaction reference between 6 and 100 characters.";
+        return;
+    }
+    button.disabled = true;
+    errorNode.textContent = "";
+    try {
+        await request(`${API_ROOT}/shop/orders/${encodeURIComponent(form.dataset.id)}/payment-reference`, {
+            method: "POST",
+            body: JSON.stringify({ reference })
+        });
+        customerOrdersStatus = "idle";
+        await loadCustomerOrders();
+        showToast("GCash reference submitted. The store will verify the payment.");
+        await showCustomerOrderDetails(form.dataset.id);
+    } catch (error) {
+        errorNode.textContent = error.message;
+        button.disabled = false;
     }
 }
 
@@ -2081,32 +2139,6 @@ function printCustomerReceipt(order, printWindow = window.open("", "_blank"))
         <table><thead><tr><th>Item</th><th>Qty</th><th>Unit price</th><th>Amount</th></tr></thead><tbody>${itemRows}</tbody></table>
         <div class="totals"><div><span>Items</span><strong>${money(subtotal)}</strong></div>
         <div><span>Delivery fee</span><strong>${money(order.delivery_fee)}</strong></div>
-async function submitCustomerGcashReference(form)
-{
-    const reference = String(new FormData(form).get("reference") || "").trim();
-    const errorNode = form.querySelector("#gcash-reference-error");
-    const button = form.querySelector('[type="submit"]');
-    if (reference.length < 6 || reference.length > 100) {
-        errorNode.textContent = "Enter a transaction reference between 6 and 100 characters.";
-        return;
-    }
-    button.disabled = true;
-    errorNode.textContent = "";
-    try {
-        await request(`${API_ROOT}/shop/orders/${encodeURIComponent(form.dataset.id)}/payment-reference`, {
-            method: "POST",
-            body: JSON.stringify({ reference })
-        });
-        customerOrdersStatus = "idle";
-        await loadCustomerOrders();
-        showToast("GCash reference submitted. The store will verify the payment.");
-        await showCustomerOrderDetails(form.dataset.id);
-    } catch (error) {
-        errorNode.textContent = error.message;
-        button.disabled = false;
-    }
-}
-
         ${Number(order.delivery_discount) > 0 ? `<div><span>Free delivery discount</span><strong>−${money(order.delivery_discount)}</strong></div>` : ""}
         <div class="grand"><span>Total</span><strong>${money(order.total)}</strong></div>
         <div><span>Payment</span><strong>${escapeHtml(paymentStatusLabel(order.payment_status))} · ${paymentMethodLabel(order.payment_method, true)}</strong></div>
@@ -2989,6 +3021,7 @@ async function openOrderPaymentModal(id) {
                     <option value="other" ${order.payment_method === "other" ? "selected" : ""}>Other</option>
                 </select></div>
                 ${order.payment_status === "partial" ? `<p class="payment-reconcile-note">This order has a previously recorded partial payment of ${money(order.amount_paid)}. Choose “Paid in full” or “Unpaid” to reconcile it; the saved amount will not change until you save.</p>` : ""}
+                ${order.payment_method === "gcash" && order.gcash_payment_reference ? `<p class="payment-reconcile-note">Customer GCash reference: <strong>${escapeHtml(order.gcash_payment_reference)}</strong>. ${order.payment_status === "paid" ? "This payment is marked paid." : "Verify it in the GCash account before marking the order paid."}</p>` : ""}
                 ${!canMarkOrderPaid ? '<p class="payment-reconcile-note">COD stays unpaid while the order is in transit. Mark it paid only after the customer receives it and pays.</p>' : ""}
                 <p class="form-error" id="business-form-error" role="alert"></p>
                 <div class="modal-actions"><button class="button secondary" type="button" data-close-business>Cancel</button><button class="button" type="submit">Save payment</button></div>
@@ -3020,7 +3053,6 @@ async function deleteContact(route, id) {
 }
 
 async function changeDocumentStatus(route, id, status) {
-                ${order.payment_method === "gcash" && order.gcash_payment_reference ? `<p class="payment-reconcile-note">Customer GCash reference: <strong>${escapeHtml(order.gcash_payment_reference)}</strong>. ${order.payment_status === "paid" ? "This payment is marked paid." : "Verify it in the GCash account before marking the order paid."}</p>` : ""}
     const action = status === "refunded" ? "refund this sale and return its stock"
         : status === "processing" ? "start processing this order and deduct or confirm reserved stock"
         : status === "ready_to_ship" ? "mark this order ready to ship"
@@ -3109,6 +3141,7 @@ async function showDocumentDetails(route, id) {
                 <div><dt>Payment method</dt><dd>${paymentMethodLabel(record.payment_method)}</dd></div>
                 <div><dt>Amount received</dt><dd>${money(record.amount_paid)}</dd></div>
                 <div><dt>Balance due</dt><dd>${money(Math.max(0, Number(record.total) - Number(record.amount_paid)))}</dd></div>
+                ${route === "orders" && record.gcash_payment_reference ? `<div><dt>GCash reference</dt><dd>${escapeHtml(record.gcash_payment_reference)} · ${record.payment_status === "paid" ? "Marked paid" : "Verify before marking paid"}</dd></div>` : ""}
                 ${route === "orders" ? `<div><dt>Delivery address</dt><dd>${escapeHtml(record.delivery_address || "—")}</dd></div>` : ""}
                 ${route === "orders" ? `<div><dt>Courier</dt><dd>${escapeHtml(record.courier || "—")}</dd></div><div><dt>Tracking number</dt><dd>${escapeHtml(record.tracking_number || "—")}</dd></div><div><dt>Tracking link</dt><dd>${record.tracking_url ? `<a href="${escapeHtml(record.tracking_url)}" target="_blank" rel="noopener noreferrer">Open courier tracking ↗</a>` : "—"}</dd></div><div><dt>Estimated delivery</dt><dd>${escapeHtml(record.estimated_delivery_at || "—")}</dd></div>` : ""}
             </dl>` : ""}
@@ -3141,7 +3174,6 @@ function printSaleReceipt(sale, printWindow = window.open("", "_blank"))
     const balanceDue = Math.max(0, Number(sale.total) - amountPaid);
 
     printWindow.document.write(`<!doctype html><html lang="en"><head><meta charset="utf-8">
-                ${route === "orders" && record.gcash_payment_reference ? `<div><dt>GCash reference</dt><dd>${escapeHtml(record.gcash_payment_reference)} · ${record.payment_status === "paid" ? "Marked paid" : "Verify before marking paid"}</dd></div>` : ""}
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Sales receipt · #${Number(sale.id)}</title>
         <style>
@@ -3317,6 +3349,7 @@ app.addEventListener("click", (event) => {
     const statusButton = event.target.closest("[data-status]");
     const deleteDocumentButton = event.target.closest("[data-delete-document]");
     const exportReportButton = event.target.closest("[data-export-report]");
+    const syncSheetsButton = event.target.closest("[data-sync-sheets]");
     const exportCurrentButton = event.target.closest("[data-export-current]");
     const editOrderPaymentButton = event.target.closest("[data-edit-order-payment]");
     const adjustStockButton = event.target.closest("[data-adjust-stock]");
@@ -3354,6 +3387,7 @@ app.addEventListener("click", (event) => {
     if (statusButton) changeDocumentStatus(currentRoute(), statusButton.dataset.status, statusButton.dataset.nextStatus);
     if (deleteDocumentButton) deleteDocument(currentRoute(), deleteDocumentButton.dataset.deleteDocument);
     if (exportReportButton) exportReportCsv();
+    if (syncSheetsButton && !sheetsSyncing) syncGoogleSheets(syncSheetsButton);
     if (exportCurrentButton) exportCurrentCsv();
     if (editOrderPaymentButton) openOrderPaymentModal(editOrderPaymentButton.dataset.editOrderPayment);
     if (saveDeliveryZoneButton) saveDeliveryZone(saveDeliveryZoneButton.dataset.saveDeliveryZone, saveDeliveryZoneButton.closest("[data-delivery-zone-row]"));
@@ -3449,6 +3483,11 @@ app.addEventListener("submit", async (event) => {
 
 document.addEventListener("submit", async (event) => {
     const form = event.target;
+    if (form.id === "gcash-payment-reference-form") {
+        event.preventDefault();
+        await submitCustomerGcashReference(form);
+        return;
+    }
     if (form.id === "delivery-zone-form") {
         event.preventDefault();
         const formData = new FormData(form);
@@ -3483,11 +3522,6 @@ document.addEventListener("submit", async (event) => {
             const result = await request(`${API_ROOT}/orders/${encodeURIComponent(form.dataset.id)}/tracking`, {
                 method: "PATCH",
                 body: JSON.stringify(payload)
-    if (form.id === "gcash-payment-reference-form") {
-        event.preventDefault();
-        await submitCustomerGcashReference(form);
-        return;
-    }
             });
             closeBusinessModal();
             showToast("Delivery tracking saved.");
@@ -3693,6 +3727,13 @@ document.addEventListener("submit", async (event) => {
             saveShopCart();
             customerOrdersStatus = "idle";
             shopStatus = "idle";
+            if (payload.payment_method === "gcash") {
+                showToast(`Order #${result.data.id} placed. Transfer the total and submit your GCash reference.`);
+                if (result.notification_warning) showToast(result.notification_warning, true);
+                window.location.hash = "#my-orders";
+                await showCustomerOrderDetails(result.data.id);
+                return;
+            }
             showToast(`Order #${result.data.id} placed. Payment is due on delivery.`);
             if (result.notification_warning) showToast(result.notification_warning, true);
             window.location.hash = "#my-orders";
@@ -3727,13 +3768,6 @@ document.addEventListener("submit", async (event) => {
                     id: Number(form.dataset.productId),
                     product_name: form.dataset.productName,
                     image_url: form.dataset.productImage,
-            if (payload.payment_method === "gcash") {
-                showToast(`Order #${result.data.id} placed. Transfer the total and submit your GCash reference.`);
-                if (result.notification_warning) showToast(result.notification_warning, true);
-                window.location.hash = "#my-orders";
-                await showCustomerOrderDetails(result.data.id);
-                return;
-            }
                     category: form.dataset.productCategory,
                     unit_price: Number(form.dataset.unitPrice),
                     quantity: Number(form.dataset.purchasedQuantity)
