@@ -47,6 +47,7 @@ let csrfToken = "";
 let shopProducts = [];
 let shopDeliveryZones = [];
 let checkoutDeliveryZoneId = "";
+let checkoutPaymentMethod = "cash";
 let deliveryQuoteLoading = false;
 let deliveryZonesError = "";
 let shopStatus = "idle";
@@ -1511,11 +1512,7 @@ async function loadPublicIntegrationsConfig() {
                 : null
         };
         manualGcashDetails = publicIntegrationsConfig.manualGcash;
-        const paymentSelect = app.querySelector("#checkout-payment-method");
-        if (paymentSelect && manualGcashDetails
-            && !paymentSelect.querySelector('option[value="gcash"]')) {
-            paymentSelect.add(new Option("GCash QR / manual transfer", "gcash"));
-        }
+        if (currentUser?.role === "customer" && currentRoute() === "shop" && shopStatus !== "idle") renderShop();
         document.querySelector("[data-analytics-settings]").hidden = !publicIntegrationsConfig.ga4MeasurementId;
         initializeAnalyticsConsent();
         if (authMode === "register" && authStatus !== "authenticated") renderLogin();
@@ -1524,6 +1521,7 @@ async function loadPublicIntegrationsConfig() {
         manualGcashDetails = null;
         const settingsButton = document.querySelector("[data-analytics-settings]");
         if (settingsButton) settingsButton.hidden = true;
+        if (currentUser?.role === "customer" && currentRoute() === "shop" && shopStatus !== "idle") renderShop();
         if (authMode === "register" && authStatus !== "authenticated") {
             renderLogin("Could not load registration security settings. Refresh the page and try again.");
         }
@@ -1641,6 +1639,7 @@ function renderResetPassword(errorMessage = "") {
 
 function renderShop()
 {
+    if (!manualGcashDetails && checkoutPaymentMethod === "gcash") checkoutPaymentMethod = "cash";
     const categories = [...new Set(shopProducts.map((product) => String(product.category || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     const searchQuery = shopSearch.trim().toLowerCase();
     const visibleProducts = shopProducts.filter((product) => {
@@ -1717,15 +1716,18 @@ function renderShop()
         <div class="shop-layout"><section>${productContent}</section>
             <aside class="cart-panel"><div class="cart-panel-heading"><div><p class="eyebrow">YOUR CART</p><h2>Order summary</h2></div><span class="cart-count">${cartCount} items</span></div>
                 <div class="cart-items">${cartRows}</div><div class="cart-total"><span>Total</span><strong>${money(cartTotal)}</strong></div>
-                <form id="checkout-form"><div class="form-group"><label for="delivery-address-select">Saved delivery address</label><select class="form-field" id="delivery-address-select" data-checkout-address><option value="">Enter a new delivery address</option>${(customerProfile?.addresses || []).map((address) => `<option value="${address.id}" ${Number(address.id) === Number(defaultAddress?.id) ? "selected" : ""}>${escapeHtml(address.label)}${Number(address.is_default) ? " · Default" : ""}</option>`).join("")}</select></div>
+                <form id="checkout-form"><fieldset class="checkout-payment"><legend>Choose payment method</legend><div class="checkout-payment-options">
+                        <label class="checkout-payment-option"><input type="radio" name="payment_method" value="cash" ${checkoutPaymentMethod === "cash" ? "checked" : ""}><span><strong>Cash on delivery</strong><small>Pay when your order arrives.</small></span></label>
+                        ${manualGcashDetails ? `<label class="checkout-payment-option"><input type="radio" name="payment_method" value="gcash" ${checkoutPaymentMethod === "gcash" ? "checked" : ""}><span><strong>GCash QR / manual transfer</strong><small>Transfer after placing your order; submit the reference for verification.</small></span></label>` : ""}
+                    </div></fieldset>
+                    <div class="form-group"><label for="delivery-address-select">Saved delivery address</label><select class="form-field" id="delivery-address-select" data-checkout-address><option value="">Enter a new delivery address</option>${(customerProfile?.addresses || []).map((address) => `<option value="${address.id}" ${Number(address.id) === Number(defaultAddress?.id) ? "selected" : ""}>${escapeHtml(address.label)}${Number(address.is_default) ? " · Default" : ""}</option>`).join("")}</select></div>
                     <div class="form-group"><label for="checkout-delivery-zone">Delivery area</label><select class="form-field" id="checkout-delivery-zone" name="delivery_zone_id" required ${deliveryQuoteLoading || !shopDeliveryZones.length ? "disabled" : ""}><option value="">${deliveryQuoteLoading ? "Loading delivery areas…" : deliveryZonesError ? "Delivery areas unavailable" : "Choose your delivery area"}</option>${shopDeliveryZones.map((zone) => `<option value="${zone.id}" ${String(zone.id) === String(checkoutDeliveryZoneId) ? "selected" : ""}>${escapeHtml(zone.area_name)} · ${money(zone.fee)}${Number(zone.free_delivery_enabled) ? ` · Free delivery${Number(zone.free_delivery_minimum) > 0 ? ` over ${money(zone.free_delivery_minimum)}` : ""}` : ""}</option>`).join("")}</select><small class="product-description">${deliveryZonesError ? `Delivery areas could not be loaded: ${escapeHtml(deliveryZonesError)}` : "Choose the area matching your destination. Fees are editable estimates; the actual courier charge may vary."}</small></div>
                     <div class="form-group"><label for="delivery-recipient">Recipient name</label><input class="form-field" id="delivery-recipient" name="recipient_name" maxlength="160" required value="${escapeHtml(defaultAddress?.recipient_name || `${currentUser?.firstname || ""} ${currentUser?.lastname || ""}`.trim())}"></div>
                     <div class="form-group"><label for="delivery-phone">Contact phone</label><input class="form-field" id="delivery-phone" name="phone" type="tel" maxlength="40" autocomplete="tel" required value="${escapeHtml(defaultAddress?.phone || customerProfile?.phone || "")}"></div>
                     <div class="form-group"><label for="delivery-address">Delivery address</label><textarea class="form-field" id="delivery-address" name="address" maxlength="500" autocomplete="street-address" required>${escapeHtml(defaultAddress?.address || customerProfile?.address || "")}</textarea></div>
                     <div class="form-group"><label for="delivery-notes">Delivery notes <span class="optional-label">Optional</span></label><textarea class="form-field" id="delivery-notes" name="delivery_notes" maxlength="1000" placeholder="Landmark, preferred delivery time, or instructions"></textarea></div>
-                    <div class="checkout-total-breakdown" id="checkout-delivery-summary">${quote ? checkoutQuoteMarkup(quote) : '<p class="product-description">Select a delivery area to see the final total.</p>'}</div>
-                    <div class="form-group"><label for="checkout-payment-method">Payment method</label><select class="form-field" id="checkout-payment-method" name="payment_method"><option value="cash">Cash on delivery</option>${manualGcashDetails ? '<option value="gcash">GCash QR / manual transfer</option>' : ""}</select></div>
-                    <p class="checkout-note">Stock is reserved when your order is placed. For GCash, open the order details after checkout to view the QR and submit your transaction reference. An admin must verify the transfer before marking it paid. COD remains available. Manage saved addresses in <a href="#account">My account</a>.</p>
+                    <div class="checkout-total-breakdown" id="checkout-delivery-summary">${quote ? checkoutQuoteMarkup(quote, checkoutPaymentMethod) : '<p class="product-description">Select a delivery area to see the final total.</p>'}</div>
+                    <p class="checkout-note">Stock is reserved when your order is placed. GCash payments remain pending until an admin verifies the transfer. Manage saved addresses in <a href="#account">My account</a>.</p>
                     <p class="form-error" id="checkout-error" role="alert"></p>
                     <button class="button checkout-button" type="submit" ${!cartEntries.length || shopStatus !== "ready" || !checkoutZone ? "disabled" : ""}>Place order</button></form></aside></div>`);
     nextTick(() => {
@@ -1758,6 +1760,12 @@ function renderShop()
             checkoutDeliveryZoneId = event.target.value;
             updateCheckoutQuote(cartTotal);
         });
+        app.querySelectorAll('input[name="payment_method"]').forEach((input) => {
+            input.addEventListener("change", (event) => {
+                checkoutPaymentMethod = event.target.value;
+                updateCheckoutQuote(cartTotal);
+            });
+        });
     });
 }
 
@@ -1776,12 +1784,12 @@ function quoteDelivery(zone, subtotal)
     };
 }
 
-function checkoutQuoteMarkup(quote)
+function checkoutQuoteMarkup(quote, paymentMethod = checkoutPaymentMethod)
 {
     return `<dl class="checkout-breakdown"><div><dt>Items</dt><dd>${money(quote.subtotal)}</dd></div>
         <div><dt>Delivery fee</dt><dd>${money(quote.delivery_fee)}</dd></div>
         ${quote.free_delivery_applied ? `<div><dt>Free delivery discount</dt><dd>−${money(quote.delivery_discount)}</dd></div>` : ""}
-        <div class="checkout-grand-total"><dt>Total due on delivery</dt><dd>${money(quote.total)}</dd></div></dl>`;
+        <div class="checkout-grand-total"><dt>${paymentMethod === "gcash" ? "Total to pay via GCash" : "Total due on delivery"}</dt><dd>${money(quote.total)}</dd></div></dl>`;
 }
 
 function updateCheckoutQuote(subtotal)
@@ -1790,7 +1798,7 @@ function updateCheckoutQuote(subtotal)
     const summary = app.querySelector("#checkout-delivery-summary");
     const button = app.querySelector('#checkout-form [type="submit"]');
     if (summary) summary.innerHTML = zone
-        ? checkoutQuoteMarkup(quoteDelivery(zone, subtotal))
+        ? checkoutQuoteMarkup(quoteDelivery(zone, subtotal), checkoutPaymentMethod)
         : '<p class="product-description">Select a delivery area to see the final total.</p>';
     if (button) button.disabled = !zone || !Object.keys(shopCart).some((id) => Number(shopCart[id]) > 0) || shopStatus !== "ready";
 }
