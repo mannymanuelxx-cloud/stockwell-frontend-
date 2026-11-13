@@ -34,6 +34,7 @@ let reportDateRange = null;
 let authMode = "login";
 let publicIntegrationsConfig = null;
 let turnstileToken = "";
+let manualGcashDetails = null;
 let turnstileWidgetId = null;
 let turnstileScriptPromise = null;
 let analyticsConsent = "";
@@ -1469,13 +1470,20 @@ async function loadPublicIntegrationsConfig() {
         const integrations = result?.integrations || {};
         publicIntegrationsConfig = {
             turnstileSiteKey: typeof integrations.turnstile_site_key === "string" ? integrations.turnstile_site_key : "",
-            ga4MeasurementId: typeof integrations.ga4_measurement_id === "string" ? integrations.ga4_measurement_id : ""
+            ga4MeasurementId: typeof integrations.ga4_measurement_id === "string" ? integrations.ga4_measurement_id : "",
+            manualGcash: integrations.manual_gcash
+                && typeof integrations.manual_gcash.account_name === "string"
+                && typeof integrations.manual_gcash.account_number === "string"
+                && typeof integrations.manual_gcash.qr_image_url === "string"
+                ? integrations.manual_gcash
+                : null
         };
         document.querySelector("[data-analytics-settings]").hidden = !publicIntegrationsConfig.ga4MeasurementId;
         initializeAnalyticsConsent();
         if (authMode === "register" && authStatus !== "authenticated") renderLogin();
     } catch (error) {
-        publicIntegrationsConfig = { turnstileSiteKey: "", ga4MeasurementId: "" };
+        publicIntegrationsConfig = { turnstileSiteKey: "", ga4MeasurementId: "", manualGcash: null };
+        manualGcashDetails = null;
         const settingsButton = document.querySelector("[data-analytics-settings]");
         if (settingsButton) settingsButton.hidden = true;
         if (authMode === "register" && authStatus !== "authenticated") {
@@ -1503,6 +1511,12 @@ function initializeAnalyticsConsent() {
     }
 }
 
+        manualGcashDetails = publicIntegrationsConfig.manualGcash;
+        const paymentSelect = app.querySelector("#checkout-payment-method");
+        if (paymentSelect && manualGcashDetails
+            && !paymentSelect.querySelector('option[value="gcash"]')) {
+            paymentSelect.add(new Option("GCash QR / manual transfer", "gcash"));
+        }
 function saveAnalyticsConsent(choice) {
     if (!["accept", "reject"].includes(choice)) return;
     analyticsConsent = choice === "accept" ? "accepted" : "rejected";
@@ -1678,7 +1692,8 @@ function renderShop()
                     <div class="form-group"><label for="delivery-address">Delivery address</label><textarea class="form-field" id="delivery-address" name="address" maxlength="500" autocomplete="street-address" required>${escapeHtml(defaultAddress?.address || customerProfile?.address || "")}</textarea></div>
                     <div class="form-group"><label for="delivery-notes">Delivery notes <span class="optional-label">Optional</span></label><textarea class="form-field" id="delivery-notes" name="delivery_notes" maxlength="1000" placeholder="Landmark, preferred delivery time, or instructions"></textarea></div>
                     <div class="checkout-total-breakdown" id="checkout-delivery-summary">${quote ? checkoutQuoteMarkup(quote) : '<p class="product-description">Select a delivery area to see the final total.</p>'}</div>
-                    <p class="checkout-note">Cash on delivery · Stock is reserved when your order is placed. Manage saved addresses in <a href="#account">My account</a>.</p>
+                    <div class="form-group"><label for="checkout-payment-method">Payment method</label><select class="form-field" id="checkout-payment-method" name="payment_method"><option value="cash">Cash on delivery</option>${manualGcashDetails ? '<option value="gcash">GCash QR / manual transfer</option>' : ""}</select></div>
+                    <p class="checkout-note">Stock is reserved when your order is placed. For GCash, open the order details after checkout to view the QR and submit your transaction reference. An admin must verify the transfer before marking it paid. COD remains available. Manage saved addresses in <a href="#account">My account</a>.</p>
                     <p class="form-error" id="checkout-error" role="alert"></p>
                     <button class="button checkout-button" type="submit" ${!cartEntries.length || shopStatus !== "ready" || !checkoutZone ? "disabled" : ""}>Place order</button></form></aside></div>`);
     nextTick(() => {
@@ -1771,7 +1786,7 @@ function renderCustomerOrders()
             ? `<section class="content-card"><div class="error-panel">${escapeHtml(shopError)}</div><button class="button secondary" type="button" data-retry-orders>Retry</button></section>`
             : customerOrders.length
                 ? `<section class="content-card"><div class="table-wrap"><table><thead><tr><th>Order</th><th>Date</th><th>Items</th><th>Total</th><th>Status</th><th>Payment</th><th>Delivery / ETA</th><th>Actions</th></tr></thead><tbody>
-                    ${customerOrders.map((order) => `<tr><td><strong>#${order.id}</strong></td><td>${escapeHtml(formatCustomerDate(order.created_at))}</td><td><div class="customer-order-items-cell">${order.preview_product_name ? productImageMarkup({ product_name: order.preview_product_name, image_url: order.preview_image_url }, "order-item-thumbnail") : ""}<span>${Number(order.item_count)} ${Number(order.item_count) === 1 ? "item" : "items"}</span></div></td><td>${money(order.total)}</td><td><span class="record-status status-${escapeHtml(order.status)}">${escapeHtml(orderStatusLabel(order.status))}</span></td><td><span class="record-status status-${escapeHtml(order.payment_status || "unpaid")}">${escapeHtml(paymentStatusLabel(order.payment_status || "unpaid"))}</span><small class="product-description">${paymentMethodLabel(order.payment_method, true)}</small></td><td>${escapeHtml(order.delivery_address || "—")}<small class="product-description">${order.estimated_delivery_at ? `Estimated delivery: ${escapeHtml(formatCustomerDate(order.estimated_delivery_at))}` : "ETA not provided yet"}</small></td><td><button class="button secondary" type="button" data-customer-order="${order.id}">Details</button>${order.status === "pending" && (order.payment_status || "unpaid") === "unpaid" && Number(order.amount_paid || 0) === 0 ? ` <button class="button danger" type="button" data-cancel-customer-order="${order.id}">Cancel</button>` : ""}${["delivered", "completed"].includes(order.status) && Number(order.returnable_quantity) > 0 ? ` <button class="button secondary" type="button" data-request-return="${order.id}">Request return</button>` : ""}</td></tr>`).join("")}
+                    ${customerOrders.map((order) => `<tr><td><strong>#${order.id}</strong></td><td>${escapeHtml(formatCustomerDate(order.created_at))}</td><td><div class="customer-order-items-cell">${order.preview_product_name ? productImageMarkup({ product_name: order.preview_product_name, image_url: order.preview_image_url }, "order-item-thumbnail") : ""}<span>${Number(order.item_count)} ${Number(order.item_count) === 1 ? "item" : "items"}</span></div></td><td>${money(order.total)}</td><td><span class="record-status status-${escapeHtml(order.status)}">${escapeHtml(orderStatusLabel(order.status))}</span></td><td><span class="record-status status-${escapeHtml(order.payment_status || "unpaid")}">${escapeHtml(paymentStatusLabel(order.payment_status || "unpaid"))}</span><small class="product-description">${paymentMethodLabel(order.payment_method, true)}</small>${order.payment_method === "gcash" && order.gcash_payment_reference ? `<small class="product-description">Reference submitted · ${order.payment_status === "paid" ? "verified" : "awaiting admin verification"}</small>` : ""}</td><td>${escapeHtml(order.delivery_address || "—")}<small class="product-description">${order.estimated_delivery_at ? `Estimated delivery: ${escapeHtml(formatCustomerDate(order.estimated_delivery_at))}` : "ETA not provided yet"}</small></td><td><button class="button secondary" type="button" data-customer-order="${order.id}">Details</button>${order.status === "pending" && (order.payment_status || "unpaid") === "unpaid" && Number(order.amount_paid || 0) === 0 && (order.payment_method !== "gcash" || !order.gcash_payment_reference) ? ` <button class="button danger" type="button" data-cancel-customer-order="${order.id}">Cancel</button>` : ""}${["delivered", "completed"].includes(order.status) && Number(order.returnable_quantity) > 0 ? ` <button class="button secondary" type="button" data-request-return="${order.id}">Request return</button>` : ""}</td></tr>`).join("")}
                     </tbody></table></div></section>`
                 : '<section class="content-card"><div class="empty-state"><strong>No orders yet</strong><p>Your placed orders will appear here.</p><a class="button" href="#shop">Browse products</a></div></section>';
     renderMarkup(`<div class="shop-toolbar"><div><p class="eyebrow">YOUR ACCOUNT</p><h1>My orders</h1><p class="subtitle">Check the status and details of your Stockwell orders.</p></div>
@@ -1999,7 +2014,12 @@ async function showCustomerOrderDetails(id)
             <div><dt>Address</dt><dd>${escapeHtml(order.delivery_address || "—")}</dd></div><div><dt>Delivery notes</dt><dd>${escapeHtml(order.delivery_notes || "—")}</dd></div>
             <div><dt>Courier</dt><dd>${escapeHtml(order.courier || "—")}</dd></div><div><dt>Tracking number</dt><dd>${escapeHtml(order.tracking_number || "—")}</dd></div>
             <div><dt>Estimated delivery</dt><dd>${escapeHtml(order.estimated_delivery_at ? formatCustomerDate(order.estimated_delivery_at) : "Not provided yet")}</dd></div>
-            <div><dt>Courier tracking</dt><dd>${order.tracking_url ? `<a href="${escapeHtml(order.tracking_url)}" target="_blank" rel="noopener noreferrer">Open ${escapeHtml(order.courier || "courier")} tracking ↗</a>` : "Tracking link not available yet."}</dd></div></dl>
+            <div><dt>Courier tracking</dt><dd>${order.tracking_url ? `<a href="${escapeHtml(order.tracking_url)}" target="_blank" rel="noopener noreferrer">Open ${escapeHtml(order.courier || "courier")} tracking ↗</a>` : "Tracking link not available yet."}</dd></div>
+            ${order.payment_method === "gcash" && order.gcash_payment_reference ? `<div><dt>GCash reference</dt><dd>${escapeHtml(order.gcash_payment_reference)} · ${order.payment_status === "paid" ? "Verified" : "Awaiting admin verification"}</dd></div>` : ""}</dl>
+            ${showManualGcash ? `<section class="content-card"><h3>Pay with GCash</h3><p>Transfer exactly <strong>${money(order.total)}</strong> to the account below. Submit the transaction reference after sending. The order stays unpaid until the store verifies the transfer.</p>
+            <div class="customer-gcash-payment"><img src="${escapeHtml(manualGcashDetails.qr_image_url)}" alt="GCash payment QR code" loading="lazy"><div><p><strong>Account name</strong><br>${escapeHtml(manualGcashDetails.account_name)}</p><p><strong>GCash number</strong><br>${escapeHtml(manualGcashDetails.account_number)}</p></div></div>
+            <form id="gcash-payment-reference-form" data-id="${escapeHtml(order.id)}"><div class="form-group"><label for="gcash-payment-reference">GCash transaction reference</label><input class="form-field" id="gcash-payment-reference" name="reference" minlength="6" maxlength="100" required value="${escapeHtml(order.gcash_payment_reference || "")}" placeholder="Enter the reference from your GCash receipt"></div>
+                <p class="product-description">${order.gcash_payment_reference ? "Reference submitted. You may update it while the order remains unpaid." : "Submitting a reference does not automatically confirm payment."}</p><p class="form-error" id="gcash-reference-error" role="alert"></p><button class="button" type="submit">${order.gcash_payment_reference ? "Update reference" : "Submit reference"}</button></form></section>` : ""}
                 <div class="table-wrap"><table><thead><tr><th>Product</th><th>Qty</th><th>Unit price</th><th>Total</th></tr></thead><tbody>${order.items.map((item) => `<tr><td><div class="product-cell">${productImageMarkup(item, "order-item-thumbnail")}<span class="product-name">${escapeHtml(item.product_name)}</span></div>${["delivered", "completed"].includes(order.status) ? `<button class="button secondary" type="button" data-review-order-product="${Number(item.product_id)}">Leave feedback</button>` : ""}</td><td>${Number(item.quantity)}</td><td>${money(item.unit_price)}</td><td>${money(item.line_total)}</td></tr>`).join("")}</tbody></table></div>
             <dl class="checkout-breakdown order-cost-breakdown"><div><dt>Items</dt><dd>${money(order.subtotal ?? order.total)}</dd></div>
                 <div><dt>Delivery · ${escapeHtml(order.delivery_zone || "No delivery area recorded")}</dt><dd>${money(order.delivery_fee)}</dd></div>
@@ -2019,6 +2039,10 @@ async function showCustomerOrderDetails(id)
         modalRoot.querySelector("[data-order-modal-backdrop]").addEventListener("click", (event) => {
             if (event.target === event.currentTarget) closeBusinessModal();
         });
+        const showManualGcash = order.payment_method === "gcash"
+            && order.payment_status === "unpaid"
+            && !cancelled
+            && manualGcashDetails;
     } catch (error) {
         closeBusinessModal();
         showToast(error.message, true);
@@ -2057,6 +2081,32 @@ function printCustomerReceipt(order, printWindow = window.open("", "_blank"))
         <table><thead><tr><th>Item</th><th>Qty</th><th>Unit price</th><th>Amount</th></tr></thead><tbody>${itemRows}</tbody></table>
         <div class="totals"><div><span>Items</span><strong>${money(subtotal)}</strong></div>
         <div><span>Delivery fee</span><strong>${money(order.delivery_fee)}</strong></div>
+async function submitCustomerGcashReference(form)
+{
+    const reference = String(new FormData(form).get("reference") || "").trim();
+    const errorNode = form.querySelector("#gcash-reference-error");
+    const button = form.querySelector('[type="submit"]');
+    if (reference.length < 6 || reference.length > 100) {
+        errorNode.textContent = "Enter a transaction reference between 6 and 100 characters.";
+        return;
+    }
+    button.disabled = true;
+    errorNode.textContent = "";
+    try {
+        await request(`${API_ROOT}/shop/orders/${encodeURIComponent(form.dataset.id)}/payment-reference`, {
+            method: "POST",
+            body: JSON.stringify({ reference })
+        });
+        customerOrdersStatus = "idle";
+        await loadCustomerOrders();
+        showToast("GCash reference submitted. The store will verify the payment.");
+        await showCustomerOrderDetails(form.dataset.id);
+    } catch (error) {
+        errorNode.textContent = error.message;
+        button.disabled = false;
+    }
+}
+
         ${Number(order.delivery_discount) > 0 ? `<div><span>Free delivery discount</span><strong>−${money(order.delivery_discount)}</strong></div>` : ""}
         <div class="grand"><span>Total</span><strong>${money(order.total)}</strong></div>
         <div><span>Payment</span><strong>${escapeHtml(paymentStatusLabel(order.payment_status))} · ${paymentMethodLabel(order.payment_method, true)}</strong></div>
@@ -2918,7 +2968,8 @@ async function openOrderPaymentModal(id) {
         const result = await request(`${API_ROOT}/orders/${encodeURIComponent(id)}`);
         const order = result.data;
         if (!order) throw new Error("Order payment details are unavailable.");
-        const canMarkOrderPaid = ["delivered", "completed"].includes(order.status);
+        const canMarkOrderPaid = ["delivered", "completed"].includes(order.status)
+            || (order.status !== "cancelled" && order.payment_method === "gcash" && Boolean(order.gcash_payment_reference));
         const choosePaymentStatus = order.payment_status === "partial"
             || (order.payment_status === "paid" && !canMarkOrderPaid);
         modalRoot.innerHTML = `<div class="modal-backdrop" data-business-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="business-modal-title">
@@ -2939,7 +2990,6 @@ async function openOrderPaymentModal(id) {
                 </select></div>
                 ${order.payment_status === "partial" ? `<p class="payment-reconcile-note">This order has a previously recorded partial payment of ${money(order.amount_paid)}. Choose “Paid in full” or “Unpaid” to reconcile it; the saved amount will not change until you save.</p>` : ""}
                 ${!canMarkOrderPaid ? '<p class="payment-reconcile-note">COD stays unpaid while the order is in transit. Mark it paid only after the customer receives it and pays.</p>' : ""}
-                ${!["delivered", "completed"].includes(order.status) ? '<p class="payment-reconcile-note">COD stays unpaid while the order is in transit. Mark it paid only after the customer receives it and pays.</p>' : ""}
                 <p class="form-error" id="business-form-error" role="alert"></p>
                 <div class="modal-actions"><button class="button secondary" type="button" data-close-business>Cancel</button><button class="button" type="submit">Save payment</button></div>
             </form></section></div>`;
@@ -2970,6 +3020,7 @@ async function deleteContact(route, id) {
 }
 
 async function changeDocumentStatus(route, id, status) {
+                ${order.payment_method === "gcash" && order.gcash_payment_reference ? `<p class="payment-reconcile-note">Customer GCash reference: <strong>${escapeHtml(order.gcash_payment_reference)}</strong>. ${order.payment_status === "paid" ? "This payment is marked paid." : "Verify it in the GCash account before marking the order paid."}</p>` : ""}
     const action = status === "refunded" ? "refund this sale and return its stock"
         : status === "processing" ? "start processing this order and deduct or confirm reserved stock"
         : status === "ready_to_ship" ? "mark this order ready to ship"
@@ -3090,6 +3141,7 @@ function printSaleReceipt(sale, printWindow = window.open("", "_blank"))
     const balanceDue = Math.max(0, Number(sale.total) - amountPaid);
 
     printWindow.document.write(`<!doctype html><html lang="en"><head><meta charset="utf-8">
+                ${route === "orders" && record.gcash_payment_reference ? `<div><dt>GCash reference</dt><dd>${escapeHtml(record.gcash_payment_reference)} · ${record.payment_status === "paid" ? "Marked paid" : "Verify before marking paid"}</dd></div>` : ""}
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Sales receipt · #${Number(sale.id)}</title>
         <style>
@@ -3431,6 +3483,11 @@ document.addEventListener("submit", async (event) => {
             const result = await request(`${API_ROOT}/orders/${encodeURIComponent(form.dataset.id)}/tracking`, {
                 method: "PATCH",
                 body: JSON.stringify(payload)
+    if (form.id === "gcash-payment-reference-form") {
+        event.preventDefault();
+        await submitCustomerGcashReference(form);
+        return;
+    }
             });
             closeBusinessModal();
             showToast("Delivery tracking saved.");
@@ -3618,7 +3675,8 @@ document.addEventListener("submit", async (event) => {
             recipient_name: String(formData.get("recipient_name") || "").trim(),
             phone: String(formData.get("phone") || "").trim(),
             delivery_notes: String(formData.get("delivery_notes") || "").trim(),
-            delivery_zone_id: Number(formData.get("delivery_zone_id"))
+            delivery_zone_id: Number(formData.get("delivery_zone_id")),
+            payment_method: String(formData.get("payment_method") || "cash")
         };
         if (!items.length || !payload.address || !payload.recipient_name || !payload.phone || !Number.isInteger(payload.delivery_zone_id) || payload.delivery_zone_id < 1) {
             errorNode.textContent = "Add at least one product, choose a delivery area, and enter the recipient, phone number, and delivery address.";
@@ -3669,6 +3727,13 @@ document.addEventListener("submit", async (event) => {
                     id: Number(form.dataset.productId),
                     product_name: form.dataset.productName,
                     image_url: form.dataset.productImage,
+            if (payload.payment_method === "gcash") {
+                showToast(`Order #${result.data.id} placed. Transfer the total and submit your GCash reference.`);
+                if (result.notification_warning) showToast(result.notification_warning, true);
+                window.location.hash = "#my-orders";
+                await showCustomerOrderDetails(result.data.id);
+                return;
+            }
                     category: form.dataset.productCategory,
                     unit_price: Number(form.dataset.unitPrice),
                     quantity: Number(form.dataset.purchasedQuantity)
