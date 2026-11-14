@@ -2577,20 +2577,20 @@ html.loading-screen-active { overflow: hidden; }
     justify-items: center;
     gap: 12px;
     padding: 38px 28px;
-    border: 1px solid rgba(255, 255, 255, .72);
+    border: 1px solid rgba(237, 232, 255, .22);
     border-radius: 18px;
-    background: rgba(255, 255, 255, .94);
-    box-shadow: 0 24px 70px rgba(18, 15, 41, .26), 0 2px 8px rgba(18, 15, 41, .08);
+    background: linear-gradient(145deg, rgba(66, 62, 99, .82), rgba(38, 36, 61, .88));
+    box-shadow: 0 24px 70px rgba(18, 15, 41, .3), inset 0 1px rgba(255, 255, 255, .08);
     backdrop-filter: blur(14px);
     text-align: center;
 }
 .loading-screen-card .app-loading-mark { width: 48px; height: 48px; }
 .loading-screen-card .app-loading-spinner {
-    border-color: #e8e5fb;
-    border-top-color: var(--teal-dark);
+    border-color: rgba(237, 232, 255, .22);
+    border-top-color: #c4b5fd;
 }
-.loading-screen-card h1 { margin: 0; color: var(--navy); font-size: 19px; letter-spacing: -.3px; }
-.loading-screen-card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.loading-screen-card h1 { margin: 0; color: #fff; font-size: 19px; letter-spacing: -.3px; }
+.loading-screen-card p { margin: 0; color: #ddd8f4; font-size: 13px; line-height: 1.5; }
 @media (max-width: 700px) {
     .loading-screen-backdrop { padding: 16px; }
     .loading-screen-card { padding: 30px 20px; border-radius: 15px; }
