@@ -2167,3 +2167,36 @@ tbody tr:hover { background: #fbfaff; }
     .analytics-consent { right: 12px; bottom: 12px; left: 12px; width: auto; align-items: stretch; flex-direction: column; }
     .analytics-consent-actions { flex-direction: row; justify-content: flex-end; }
 }
+
+.app-loading {
+    display: grid;
+    width: min(420px, 100%);
+    justify-items: center;
+    gap: 12px;
+    padding: 38px 28px;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, .96);
+    box-shadow: 0 18px 48px rgba(23, 45, 64, .09);
+    text-align: center;
+}
+.app-loading-mark { width: 48px; height: 48px; margin-bottom: 4px; object-fit: contain; }
+.app-loading-spinner, .loading::before {
+    width: 30px;
+    height: 30px;
+    border: 3px solid #dcebe7;
+    border-top-color: var(--teal);
+    border-radius: 50%;
+    animation: stockwell-spin .8s linear infinite;
+}
+.app-loading h1 { margin: 0; color: var(--navy); font-size: 19px; letter-spacing: -.3px; }
+.app-loading p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.loading::before { display: block; margin: 0 auto 12px; content: ""; }
+@keyframes stockwell-spin { to { transform: rotate(360deg); } }
+@media (max-width: 700px) {
+    .app-loading { padding: 30px 20px; border-radius: 15px; }
+    .app-loading-mark { width: 42px; height: 42px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .app-loading-spinner, .loading::before { animation: none; }
+}
