@@ -15,7 +15,14 @@ createApp({
     template: '<div class="vue-app-content" v-html="renderedContent"></div>'
 }).mount(app);
 const modalRoot = document.querySelector("#modal-root");
+const loadingScreenRoot = document.querySelector("#loading-screen-root");
 const toastRegion = document.querySelector("#toast-region");
+let activeLoadingRequests = 0;
+let loadingScreenDelayTimer = null;
+let loadingScreenHideTimer = null;
+let loadingScreenShownAt = 0;
+const loadingScreenDelay = 350;
+const loadingScreenMinimumDuration = 500;
 let products = [];
 let searchTerm = "";
 let apiStatus = "loading";
@@ -273,7 +280,7 @@ async function refreshAdminNotifications({ notifyNewOrders = true } = {}) {
     if (!hasPermission("orders.manage") || adminNotificationRefreshInProgress) return;
     adminNotificationRefreshInProgress = true;
     try {
-        const result = await request(`${API_ROOT}/admin-notifications`);
+        const result = await request(`${API_ROOT}/admin-notifications`, { loadingScreen: false });
         const data = result?.data;
         if (!data || !Array.isArray(data.pending_orders) || !Array.isArray(data.payment_updates)) throw new Error("The notifications API did not provide valid order and payment data.");
         const nextOrders = data.pending_orders;
@@ -371,7 +378,7 @@ async function refreshReturnNotifications({ notifyNewRequests = true } = {}) {
     if (!hasPermission("orders.manage") || returnNotificationRefreshInProgress) return;
     returnNotificationRefreshInProgress = true;
     try {
-        const result = await request(`${API_ROOT}/returns`);
+        const result = await request(`${API_ROOT}/returns`, { loadingScreen: false });
         if (!Array.isArray(result?.data)) throw new Error("The returns API did not provide a valid request list.");
         const pending = result.data.filter((request) => request.status === "requested");
         const pendingIds = new Set(pending.map((request) => String(request.id)));
@@ -2291,8 +2298,8 @@ async function refreshCustomerOrders()
     customerOrderRefreshInProgress = true;
     try {
         const [ordersResult, notificationsResult] = await Promise.all([
-            request(`${API_ROOT}/shop/orders`),
-            request(`${API_ROOT}/shop/notifications`)
+            request(`${API_ROOT}/shop/orders`, { loadingScreen: false }),
+            request(`${API_ROOT}/shop/notifications`, { loadingScreen: false })
         ]);
         if (!Array.isArray(ordersResult?.data) || !Array.isArray(notificationsResult?.data)) {
             throw new Error("The latest order information is invalid.");
@@ -2451,42 +2458,96 @@ async function saveDeliveryZone(id, row)
 }
 
 async function request(url, options = {}) {
-    const method = String(options.method || "GET").toUpperCase();
-    const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
-    if (csrfToken && ["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
-        headers["X-CSRF-Token"] = csrfToken;
-    }
-    const response = await fetch(url, {
-        ...options,
-        credentials: "include",
-        headers
-    });
-    if (response.status === 204) return null;
-    if (!response.ok) {
-        let result = null;
+    const { loadingScreen = true, ...requestOptions } = options;
+    const finishLoading = loadingScreen ? beginDelayedLoadingScreen() : () => {};
+    try {
+        const method = String(requestOptions.method || "GET").toUpperCase();
+        const headers = { "Content-Type": "application/json", ...(requestOptions.headers || {}) };
+        if (csrfToken && ["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
+            headers["X-CSRF-Token"] = csrfToken;
+        }
+        const response = await fetch(url, {
+            ...requestOptions,
+            credentials: "include",
+            headers
+        });
+        if (response.status === 204) return null;
+        if (!response.ok) {
+            let result = null;
+            try {
+                result = await response.json();
+            } catch {
+                result = null;
+            }
+            const error = new Error(result?.error || `Request failed (${response.status}).`);
+            error.status = response.status;
+            if (response.status === 401 && url.includes("/api/")) {
+                authStatus = "unauthenticated";
+                currentUser = null;
+                render();
+                trackAnalyticsPageView();
+            }
+            throw error;
+        }
+
+        let result;
         try {
             result = await response.json();
         } catch {
-            result = null;
+            throw new Error("The backend returned an invalid JSON response.");
         }
-        const error = new Error(result?.error || `Request failed (${response.status}).`);
-        error.status = response.status;
-        if (response.status === 401 && url.includes("/api/")) {
-            authStatus = "unauthenticated";
-            currentUser = null;
-            render();
-            trackAnalyticsPageView();
-        }
-        throw error;
+        return result;
+    } finally {
+        finishLoading();
+    }
+}
+
+function beginDelayedLoadingScreen() {
+    activeLoadingRequests += 1;
+    if (loadingScreenHideTimer !== null) {
+        window.clearTimeout(loadingScreenHideTimer);
+        loadingScreenHideTimer = null;
+    }
+    if (activeLoadingRequests === 1 && loadingScreenRoot.hidden) {
+        loadingScreenDelayTimer = window.setTimeout(() => {
+            loadingScreenDelayTimer = null;
+            if (activeLoadingRequests === 0) return;
+            loadingScreenShownAt = Date.now();
+            loadingScreenRoot.innerHTML = `<section class="loading-screen-backdrop" role="status" aria-live="polite">
+                <div class="loading-screen-card">
+                    <img class="app-loading-mark" src="stockwell-mark.svg" alt="">
+                    <span class="app-loading-spinner" aria-hidden="true"></span>
+                    <h1>Loading your workspace</h1>
+                    <p>Getting the latest Stockwell data…</p>
+                </div>
+            </section>`;
+            document.documentElement.classList.add("loading-screen-active");
+            loadingScreenRoot.hidden = false;
+        }, loadingScreenDelay);
     }
 
-    let result;
-    try {
-        result = await response.json();
-    } catch {
-        throw new Error("The backend returned an invalid JSON response.");
-    }
-    return result;
+    let finished = false;
+    return () => {
+        if (finished) return;
+        finished = true;
+        activeLoadingRequests = Math.max(0, activeLoadingRequests - 1);
+        if (activeLoadingRequests > 0) return;
+        if (loadingScreenDelayTimer !== null) {
+            window.clearTimeout(loadingScreenDelayTimer);
+            loadingScreenDelayTimer = null;
+        }
+        if (loadingScreenRoot.hidden) return;
+        const visibleDuration = Date.now() - loadingScreenShownAt;
+        const remainingDuration = Math.max(0, loadingScreenMinimumDuration - visibleDuration);
+        loadingScreenHideTimer = window.setTimeout(() => {
+            loadingScreenHideTimer = null;
+            if (activeLoadingRequests === 0) {
+                loadingScreenRoot.hidden = true;
+                loadingScreenRoot.innerHTML = "";
+                document.documentElement.classList.remove("loading-screen-active");
+            }
+        }, remainingDuration);
+    };
 }
 
 async function loadProducts() {
@@ -2933,7 +2994,11 @@ function openDocumentModal(route, record = null) {
     const partyLabel = route === "purchases" ? "Supplier" : "Customer";
     const partyKey = route === "purchases" ? "supplier_id" : "customer_id";
     const partyOptions = businessParties.map((party) => `<option value="${party.id}" ${String(party.id) === String(record?.[partyKey] || "") ? "selected" : ""}>${escapeHtml(party.name)}</option>`).join("");
-    const canMarkOrderPaid = route !== "orders" || ["delivered", "completed"].includes(record?.status);
+    const hasVerifiedGcashReference = record?.payment_method === "gcash"
+        && Boolean(String(record?.gcash_payment_reference || "").trim());
+    const canMarkOrderPaid = route !== "orders"
+        || ["delivered", "completed"].includes(record?.status)
+        || (record?.status !== "cancelled" && hasVerifiedGcashReference);
     const choosePaymentStatus = record?.payment_status === "partial"
         || (route === "orders" && record?.payment_status === "paid" && !canMarkOrderPaid);
     const explanation = record
@@ -2962,7 +3027,7 @@ function openDocumentModal(route, record = null) {
                     <option value="bank_transfer" ${record?.payment_method === "bank_transfer" ? "selected" : ""}>Bank transfer</option>
                     <option value="other" ${record?.payment_method === "other" ? "selected" : ""}>Other</option>
                 </select></div>
-            </div>${record?.payment_status === "partial" ? `<p class="payment-reconcile-note">This record has a previously recorded partial payment of ${money(record.amount_paid)}. Choose “Paid in full” or “Unpaid” to reconcile it; the saved amount will not change until you save.</p>` : route === "orders" && record?.payment_status === "paid" && !canMarkOrderPaid ? '<p class="payment-reconcile-note">This order is marked paid before delivery. Choose unpaid to correct it before saving.</p>' : ""}` : ""}
+            </div>${record?.payment_status === "partial" ? `<p class="payment-reconcile-note">This record has a previously recorded partial payment of ${money(record.amount_paid)}. Choose “Paid in full” or “Unpaid” to reconcile it; the saved amount will not change until you save.</p>` : route === "orders" && record?.payment_status === "paid" && !canMarkOrderPaid ? '<p class="payment-reconcile-note">Cash on delivery can only be marked paid after delivery. Choose unpaid to correct it before saving.</p>' : route === "orders" && record && !["delivered", "completed", "cancelled"].includes(record.status) ? `<p class="payment-reconcile-note">${hasVerifiedGcashReference ? "GCash with a submitted reference can be verified and marked paid before delivery." : "GCash can be marked paid before delivery after the customer submits a payment reference. COD is marked paid after delivery."}</p>` : ""}` : ""}
             <div class="document-item-list">${(record?.items?.length ? record.items : [{}]).map((item) => documentItemRow(route, item)).join("")}</div>
             <button class="button secondary add-item-button" type="button" data-add-item>Add another product</button>
             <p class="form-error" id="business-form-error" role="alert"></p>
@@ -3035,7 +3100,7 @@ async function openOrderPaymentModal(id) {
                 </select></div>
                 ${order.payment_status === "partial" ? `<p class="payment-reconcile-note">This order has a previously recorded partial payment of ${money(order.amount_paid)}. Choose “Paid in full” or “Unpaid” to reconcile it; the saved amount will not change until you save.</p>` : ""}
                 ${order.payment_method === "gcash" && order.gcash_payment_reference ? `<p class="payment-reconcile-note">Customer GCash reference: <strong>${escapeHtml(order.gcash_payment_reference)}</strong>. ${order.payment_status === "paid" ? "This payment is marked paid." : "Verify it in the GCash account before marking the order paid."}</p>` : ""}
-                ${!canMarkOrderPaid ? '<p class="payment-reconcile-note">COD stays unpaid while the order is in transit. Mark it paid only after the customer receives it and pays.</p>' : ""}
+                ${!canMarkOrderPaid ? `<p class="payment-reconcile-note">${order.status === "cancelled" ? "Cancelled orders cannot be marked paid." : order.payment_method === "gcash" ? "A GCash reference must be submitted before this order can be marked paid before delivery." : "COD stays unpaid while the order is in transit. Mark it paid only after the customer receives it and pays."}</p>` : ""}
                 <p class="form-error" id="business-form-error" role="alert"></p>
                 <div class="modal-actions"><button class="button secondary" type="button" data-close-business>Cancel</button><button class="button" type="submit">Save payment</button></div>
             </form></section></div>`;

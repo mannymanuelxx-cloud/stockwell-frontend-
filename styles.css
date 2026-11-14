@@ -2523,3 +2523,76 @@ textarea:focus-visible, summary:focus-visible { outline-color: rgba(139, 124, 24
 @media (max-width: 700px) {
     .nav-list { scrollbar-color: #c4b5fd transparent; }
 }
+
+#loading-screen-root[hidden] { display: none; }
+html.loading-screen-active { overflow: hidden; }
+.loading-screen-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1300;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    padding: 22px;
+    isolation: isolate;
+    background:
+        radial-gradient(ellipse at 16% 18%, rgba(196, 181, 253, .48), transparent 36%),
+        radial-gradient(ellipse at 84% 78%, rgba(139, 124, 246, .34), transparent 38%),
+        linear-gradient(135deg, #25243a 0%, #3b3857 52%, #28263f 100%);
+}
+.loading-screen-backdrop::before,
+.loading-screen-backdrop::after {
+    position: absolute;
+    z-index: -1;
+    border: 1px solid rgba(237, 232, 255, .18);
+    border-radius: 50%;
+    content: "";
+    pointer-events: none;
+}
+.loading-screen-backdrop::before {
+    top: -34vmin;
+    left: -18vmin;
+    width: 76vmin;
+    aspect-ratio: 1;
+    box-shadow:
+        0 0 0 4vmin rgba(237, 232, 255, .035),
+        0 0 0 10vmin rgba(237, 232, 255, .035),
+        0 0 0 18vmin rgba(237, 232, 255, .025);
+}
+.loading-screen-backdrop::after {
+    right: -24vmin;
+    bottom: -42vmin;
+    width: 88vmin;
+    aspect-ratio: 1;
+    border-color: rgba(196, 181, 253, .2);
+    box-shadow:
+        0 0 0 7vmin rgba(196, 181, 253, .045),
+        0 0 0 16vmin rgba(196, 181, 253, .035);
+}
+.loading-screen-card {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    width: min(420px, 100%);
+    justify-items: center;
+    gap: 12px;
+    padding: 38px 28px;
+    border: 1px solid rgba(255, 255, 255, .72);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, .94);
+    box-shadow: 0 24px 70px rgba(18, 15, 41, .26), 0 2px 8px rgba(18, 15, 41, .08);
+    backdrop-filter: blur(14px);
+    text-align: center;
+}
+.loading-screen-card .app-loading-mark { width: 48px; height: 48px; }
+.loading-screen-card .app-loading-spinner {
+    border-color: #e8e5fb;
+    border-top-color: var(--teal-dark);
+}
+.loading-screen-card h1 { margin: 0; color: var(--navy); font-size: 19px; letter-spacing: -.3px; }
+.loading-screen-card p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+@media (max-width: 700px) {
+    .loading-screen-backdrop { padding: 16px; }
+    .loading-screen-card { padding: 30px 20px; border-radius: 15px; }
+    .loading-screen-card .app-loading-mark { width: 42px; height: 42px; }
+}
