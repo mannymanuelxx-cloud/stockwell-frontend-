@@ -1276,11 +1276,13 @@ function render() {
         updateLowStockNotificationBadge();
         modalRoot.innerHTML = "";
         if (authStatus === "checking") {
-            renderMarkup(`<section class="app-loading" role="status" aria-live="polite">
-                <img class="app-loading-mark" src="stockwell-mark.svg" alt="">
-                <span class="app-loading-spinner" aria-hidden="true"></span>
-                <h1>Preparing your workspace</h1>
-                <p>Connecting securely to Stockwell…</p>
+            renderMarkup(`<section class="loading-screen-backdrop" role="status" aria-live="polite">
+                <div class="loading-screen-card">
+                    <img class="app-loading-mark" src="stockwell-mark.svg" alt="">
+                    <span class="app-loading-spinner" aria-hidden="true"></span>
+                    <h1>Preparing your workspace</h1>
+                    <p>Connecting securely to Stockwell…</p>
+                </div>
             </section>`);
         } else {
             renderLogin();
