@@ -1764,6 +1764,12 @@ function renderShop()
     const selectedCartTotal = selectedCartEntries.reduce((total, entry) => total + Number(entry.product.price) * entry.quantity, 0);
     const cartCount = cartEntries.reduce((total, entry) => total + entry.quantity, 0);
     const selectedCartCount = selectedCartEntries.reduce((total, entry) => total + entry.quantity, 0);
+    const cartItemLabel = `${cartCount} item${cartCount === 1 ? "" : "s"}`;
+    const productAvailabilityLabel = shopStatus === "loading"
+        ? "Loading available products…"
+        : shopStatus === "error"
+            ? "Product availability could not be loaded."
+            : `${baseProducts.length} product${baseProducts.length === 1 ? "" : "s"} available.`;
     const cartRows = cartEntries.length
         ? cartEntries.map(({ product, quantity }) => `<div class="cart-row">
             <label class="cart-select"><input type="checkbox" data-cart-select="${product.id}" ${shopCartSelection[product.id] === false ? "" : "checked"} aria-label="Select ${escapeHtml(product.product_name)} for checkout"></label>
@@ -1794,16 +1800,16 @@ function renderShop()
         : shopStatus === "error"
             ? `<div class="content-card"><div class="error-panel">${escapeHtml(shopError)}</div><button class="button secondary" type="button" data-retry-shop>Retry</button></div>`
             : `<div class="shop-product-grid">${productCards}</div>`;
-    renderMarkup(`    <div class="shop-toolbar"><div><p class="eyebrow">STOCKWELL STORE</p><h1>Shop products</h1><p class="subtitle">Choose from items currently in stock. ${baseProducts.length} products available.</p></div>
+    renderMarkup(`    <div class="shop-toolbar"><div><p class="eyebrow">STOCKWELL STORE</p><h1>Shop products</h1><p class="subtitle">Choose from items currently in stock. ${productAvailabilityLabel}</p></div>
         <nav class="shop-nav" aria-label="Customer navigation"><a class="shop-nav-link active" href="#shop">Shop</a><a class="shop-nav-link" href="#my-orders">My orders</a><a class="shop-nav-link" href="#account">My account</a><span class="cart-count">${cartCount} in cart</span></nav></div>
         <div class="shop-toolbar shop-filters"><input class="form-field" type="search" data-shop-search placeholder="Search products, SKU, or details" aria-label="Search products" value="${escapeHtml(shopSearch)}">
             <select class="form-field" data-shop-category aria-label="Filter by category"><option value="">All categories</option>${categories.map((category) => `<option value="${escapeHtml(category)}" ${category === shopCategory ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select>
             <select class="form-field" data-shop-sort aria-label="Sort products"><option value="relevance" ${shopSort === "relevance" ? "selected" : ""}>Most relevant</option><option value="best-selling" ${shopSort === "best-selling" ? "selected" : ""}>Best selling</option><option value="name" ${shopSort === "name" ? "selected" : ""}>Name: A to Z</option><option value="price-low" ${shopSort === "price-low" ? "selected" : ""}>Price: low to high</option><option value="price-high" ${shopSort === "price-high" ? "selected" : ""}>Price: high to low</option></select></div>
         <div class="shop-layout"><section>${productContent}</section>
-            <aside class="cart-panel"><div class="cart-panel-heading"><div><p class="eyebrow">YOUR CART</p><h2>Order summary</h2></div><span class="cart-count">${cartCount} items</span></div>
+            <aside class="cart-panel"><div class="cart-panel-heading"><div><p class="eyebrow">YOUR CART</p><h2>Order summary</h2></div><span class="cart-count">${cartItemLabel}</span></div>
                 <label class="cart-select-all"><input type="checkbox" data-cart-select-all ${cartEntries.length && selectedCartEntries.length === cartEntries.length ? "checked" : ""} ${cartEntries.length ? "" : "disabled"}> Select all</label>
                 <div class="cart-items">${cartRows}</div><div class="cart-total"><span>Selected total</span><strong>${money(selectedCartTotal)}</strong></div>
-                <p class="product-description">${selectedCartCount} of ${cartCount} item${cartCount === 1 ? "" : "s"} selected</p>
+                <p class="product-description">${selectedCartCount} of ${cartItemLabel} selected</p>
                 <button class="button checkout-button" type="button" data-checkout-cart ${!selectedCartEntries.length || shopStatus !== "ready" ? "disabled" : ""}>Checkout selected (${selectedCartCount})</button>
                 <p class="checkout-note">Use <strong>Buy now</strong> on a product to check out directly without changing your cart.</p></aside></div>`);
     nextTick(() => {
