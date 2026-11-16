@@ -15,8 +15,10 @@ createApp({
     template: '<div class="vue-app-content" v-html="renderedContent"></div>'
 }).mount(app);
 const modalRoot = document.querySelector("#modal-root");
+const confirmationRoot = document.querySelector("#confirmation-root");
 const loadingScreenRoot = document.querySelector("#loading-screen-root");
 const toastRegion = document.querySelector("#toast-region");
+let pendingConfirmation = null;
 let activeLoadingRequests = 0;
 let loadingScreenDelayTimer = null;
 let loadingScreenHideTimer = null;
@@ -264,6 +266,67 @@ function hasPermission(permission) {
 
 function hasAnyPermission(permissions) {
     return permissions.some((permission) => hasPermission(permission));
+}
+
+function confirmAction(message, { title = "Please confirm", confirmLabel = "Continue", danger = false } = {}) {
+    if (pendingConfirmation) return Promise.resolve(false);
+
+    return new Promise((resolve) => {
+        const previousFocus = document.activeElement;
+        confirmationRoot.innerHTML = `<div class="confirmation-backdrop" data-confirm-backdrop>
+            <section class="confirmation-dialog${danger ? " confirmation-dialog-danger" : ""}" role="alertdialog" aria-modal="true" aria-labelledby="confirmation-title" aria-describedby="confirmation-message">
+                <span class="confirmation-icon" aria-hidden="true">${danger ? "!" : "?"}</span>
+                <h2 id="confirmation-title">${escapeHtml(title)}</h2>
+                <p id="confirmation-message">${escapeHtml(message)}</p>
+                <div class="confirmation-actions">
+                    <button class="button secondary" type="button" data-confirm-cancel>Cancel</button>
+                    <button class="button${danger ? " danger" : ""}" type="button" data-confirm-accept>${escapeHtml(confirmLabel)}</button>
+                </div>
+            </section>
+        </div>`;
+        confirmationRoot.hidden = false;
+        document.documentElement.classList.add("confirmation-open");
+
+        const dialog = confirmationRoot.querySelector(".confirmation-dialog");
+        const cancelButton = confirmationRoot.querySelector("[data-confirm-cancel]");
+        const acceptButton = confirmationRoot.querySelector("[data-confirm-accept]");
+        let settled = false;
+        const finish = (accepted) => {
+            if (settled) return;
+            settled = true;
+            pendingConfirmation = null;
+            confirmationRoot.hidden = true;
+            confirmationRoot.innerHTML = "";
+            document.documentElement.classList.remove("confirmation-open");
+            resolve(accepted);
+            if (previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
+        };
+
+        pendingConfirmation = { finish };
+        cancelButton.addEventListener("click", () => finish(false));
+        acceptButton.addEventListener("click", () => finish(true));
+        confirmationRoot.querySelector("[data-confirm-backdrop]").addEventListener("click", (event) => {
+            if (event.target === event.currentTarget) finish(false);
+        });
+        dialog.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                finish(false);
+                return;
+            }
+            if (event.key !== "Tab") return;
+            const first = cancelButton;
+            const last = acceptButton;
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        });
+        cancelButton.focus();
+    });
 }
 
 function updateAdminOrderNotificationBadge() {
@@ -2417,7 +2480,7 @@ async function updateReturnStatus(id, status)
         : status === "refunded"
             ? "Confirm the refund has already been processed outside Stockwell? This only records the refund; it does not send money."
             : `${status === "approved" ? "Approve" : "Reject"} this customer return request?`;
-    if (!window.confirm(confirmation)) return;
+    if (!await confirmAction(confirmation, { title: "Update return request", confirmLabel: status === "rejected" ? "Reject request" : "Confirm update", danger: status === "rejected" })) return;
     try {
         const result = await request(`${API_ROOT}/returns/${encodeURIComponent(id)}`, {
             method: "PATCH",
@@ -2944,7 +3007,11 @@ async function openProductDetails(id) {
 
 async function deleteProduct(id) {
     const product = products.find((item) => String(item.id) === String(id));
-    if (!product || !window.confirm(`Delete "${product.product_name}" from the inventory?`)) return;
+    if (!product || !await confirmAction(`Delete "${product.product_name}" from the inventory?`, {
+        title: "Delete product",
+        confirmLabel: "Delete product",
+        danger: true
+    })) return;
 
     try {
         await request(`${API_PRODUCTS}/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -3121,7 +3188,11 @@ function closeBusinessModal() {
 
 async function deleteContact(route, id) {
     const record = businessData.find((item) => String(item.id) === String(id));
-    if (!record || !window.confirm(`Delete ${record.name}? Records linked to past activity cannot be deleted.`)) return;
+    if (!record || !await confirmAction(`Delete ${record.name}? Records linked to past activity cannot be deleted.`, {
+        title: `Delete ${route === "customers" ? "customer" : "supplier"}`,
+        confirmLabel: "Delete",
+        danger: true
+    })) return;
     try {
         await request(`${API_ROOT}/${route}/${encodeURIComponent(id)}`, { method: "DELETE" });
         showToast(`${route === "customers" ? "Customer" : "Supplier"} deleted.`);
@@ -3141,7 +3212,11 @@ async function changeDocumentStatus(route, id, status) {
         : status === "completed" ? "complete this order and deduct its stock"
         : status === "cancelled" ? `cancel this ${route === "purchases" ? "purchase" : "order"}`
             : "mark this purchase received and add its stock";
-    if (!window.confirm(`Are you sure you want to ${action}?`)) return;
+    if (!await confirmAction(`Are you sure you want to ${action}?`, {
+        title: "Confirm order update",
+        confirmLabel: status === "cancelled" ? "Cancel order" : "Confirm update",
+        danger: status === "cancelled" || status === "refunded"
+    })) return;
     try {
         const result = await request(`${API_ROOT}/${route}/${encodeURIComponent(id)}`, {
             method: "PATCH",
@@ -3171,7 +3246,11 @@ async function deleteDocument(route, id) {
         : route === "orders" && record?.status === "completed" ? "delete this completed order and restore its stock"
             : route === "purchases" && record?.status === "received" ? "delete this received purchase and remove its stock (only if still available)"
                 : "delete this record";
-    if (!window.confirm(`Are you sure you want to ${action}? This cannot be undone.`)) return;
+    if (!await confirmAction(`Are you sure you want to ${action}? This cannot be undone.`, {
+        title: "Delete record",
+        confirmLabel: "Delete record",
+        danger: true
+    })) return;
     try {
         await request(`${API_ROOT}/${route}/${encodeURIComponent(id)}`, { method: "DELETE" });
         showToast("Record deleted.");
@@ -3196,7 +3275,11 @@ async function deleteManagedUser(id, username, role) {
     const confirmation = role === "customer"
         ? `Delete the customer account "${username}"? Accounts with sales or orders on record cannot be deleted.`
         : `Permanently delete the ${accountType} "${username}"? This cannot be undone.`;
-    if (!window.confirm(confirmation)) return;
+    if (!await confirmAction(confirmation, {
+        title: "Delete account",
+        confirmLabel: "Delete account",
+        danger: true
+    })) return;
 
     try {
         await request(`${API_ROOT}/users/${encodeURIComponent(id)}`, { method: "DELETE" });
@@ -3336,7 +3419,7 @@ async function openOrderTrackingModal(id)
     }
 }
 
-app.addEventListener("click", (event) => {
+app.addEventListener("click", async (event) => {
     const authModeButton = event.target.closest("[data-auth-mode]");
     const retryShopButton = event.target.closest("[data-retry-shop]");
     const retryOrdersButton = event.target.closest("[data-retry-orders]");
@@ -3376,12 +3459,20 @@ app.addEventListener("click", (event) => {
     }
     if (productDetailsButton) showProductDetails(productDetailsButton.dataset.productDetails);
     if (customerOrderButton) showCustomerOrderDetails(customerOrderButton.dataset.customerOrder);
-    if (cancelCustomerOrderButton && window.confirm(`Cancel order #${cancelCustomerOrderButton.dataset.cancelCustomerOrder}? Reserved stock will be released.`)) {
+    if (cancelCustomerOrderButton && await confirmAction(`Cancel order #${cancelCustomerOrderButton.dataset.cancelCustomerOrder}? Reserved stock will be released.`, {
+        title: "Cancel order",
+        confirmLabel: "Cancel order",
+        danger: true
+    })) {
         cancelCustomerOrder(cancelCustomerOrderButton.dataset.cancelCustomerOrder);
     }
     if (markNotificationsReadButton) markCustomerNotificationsRead();
     if (setDefaultAddressButton) updateCustomerAddress("default", setDefaultAddressButton.dataset.defaultAddress);
-    if (deleteAddressButton && window.confirm("Remove this saved delivery address?")) {
+    if (deleteAddressButton && await confirmAction("Remove this saved delivery address?", {
+        title: "Remove saved address",
+        confirmLabel: "Remove address",
+        danger: true
+    })) {
         updateCustomerAddress("delete", deleteAddressButton.dataset.deleteAddress);
     }
     if (requestReturnButton) openReturnRequestModal(requestReturnButton.dataset.requestReturn);
@@ -3473,7 +3564,11 @@ app.addEventListener("click", (event) => {
     if (saveDeliveryZoneButton) saveDeliveryZone(saveDeliveryZoneButton.dataset.saveDeliveryZone, saveDeliveryZoneButton.closest("[data-delivery-zone-row]"));
     if (deleteDeliveryZoneButton) {
         const zone = businessData.find((item) => String(item.id) === deleteDeliveryZoneButton.dataset.deleteDeliveryZone);
-        if (zone && window.confirm(`Delete delivery area "${zone.area_name}"? Saved orders will keep their original fee and area.`)) {
+        if (zone && await confirmAction(`Delete delivery area "${zone.area_name}"? Saved orders will keep their original fee and area.`, {
+            title: "Delete delivery area",
+            confirmLabel: "Delete area",
+            danger: true
+        })) {
             request(`${API_ROOT}/delivery-zones/${encodeURIComponent(zone.id)}`, { method: "DELETE" }).then((result) => {
                 businessData = Array.isArray(result?.data) ? result.data : businessData.filter((item) => String(item.id) !== String(zone.id));
                 showToast("Delivery area deleted.");
@@ -3481,7 +3576,10 @@ app.addEventListener("click", (event) => {
             }).catch((error) => showToast(error.message, true));
         }
     }
-    if (backupButton && window.confirm("This SQL backup contains user account hashes and business data. Save it somewhere private?")) {
+    if (backupButton && await confirmAction("This SQL backup contains user account hashes and business data. Save it somewhere private?", {
+        title: "Download database backup",
+        confirmLabel: "Download backup"
+    })) {
         window.location.href = `${API_ROOT}/backup`;
     }
     if (printReportButton) printReportSummary();
