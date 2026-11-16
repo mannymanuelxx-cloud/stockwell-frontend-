@@ -3065,6 +3065,9 @@ function openDocumentModal(route, record = null) {
     const partyOptions = businessParties.map((party) => `<option value="${party.id}" ${String(party.id) === String(record?.[partyKey] || "") ? "selected" : ""}>${escapeHtml(party.name)}</option>`).join("");
     const hasVerifiedGcashReference = record?.payment_method === "gcash"
         && Boolean(String(record?.gcash_payment_reference || "").trim());
+    const legacyPaymentMethod = record && !["cash", "gcash"].includes(record.payment_method)
+        ? `<option value="${escapeHtml(record.payment_method)}" selected disabled>Existing: ${escapeHtml(paymentMethodLabel(record.payment_method, route === "orders"))} (legacy)</option>`
+        : "";
     const canMarkOrderPaid = route !== "orders"
         || ["delivered", "completed"].includes(record?.status)
         || (record?.status !== "cancelled" && hasVerifiedGcashReference);
@@ -3090,11 +3093,9 @@ function openDocumentModal(route, record = null) {
                     <option value="unpaid" ${record?.payment_status === "unpaid" || (route === "orders" && !record) ? "selected" : ""}>Unpaid</option>
                 </select></div>
                 <div class="form-group"><label for="sale-payment-method">Payment method</label><select class="form-field" id="sale-payment-method" name="payment_method">
-                    <option value="cash" ${!record || record.payment_method === "cash" ? "selected" : ""}>${route === "orders" ? "Cash / COD" : "Cash"}</option>
-                    <option value="card" ${record?.payment_method === "card" ? "selected" : ""}>Card</option>
+                    <option value="cash" ${!record || record.payment_method === "cash" ? "selected" : ""}>${route === "orders" ? "Cash on delivery (COD)" : "Cash / COD"}</option>
                     <option value="gcash" ${record?.payment_method === "gcash" ? "selected" : ""}>GCash</option>
-                    <option value="bank_transfer" ${record?.payment_method === "bank_transfer" ? "selected" : ""}>Bank transfer</option>
-                    <option value="other" ${record?.payment_method === "other" ? "selected" : ""}>Other</option>
+                    ${legacyPaymentMethod}
                 </select></div>
             </div>${record?.payment_status === "partial" ? `<p class="payment-reconcile-note">This record has a previously recorded partial payment of ${money(record.amount_paid)}. Choose “Paid in full” or “Unpaid” to reconcile it; the saved amount will not change until you save.</p>` : route === "orders" && record?.payment_status === "paid" && !canMarkOrderPaid ? '<p class="payment-reconcile-note">Cash on delivery can only be marked paid after delivery. Choose unpaid to correct it before saving.</p>' : route === "orders" && record && !["delivered", "completed", "cancelled"].includes(record.status) ? `<p class="payment-reconcile-note">${hasVerifiedGcashReference ? "GCash with a submitted reference can be verified and marked paid before delivery." : "GCash can be marked paid before delivery after the customer submits a payment reference. COD is marked paid after delivery."}</p>` : ""}` : ""}
             <div class="document-item-list">${(record?.items?.length ? record.items : [{}]).map((item) => documentItemRow(route, item)).join("")}</div>
@@ -3149,6 +3150,9 @@ async function openOrderPaymentModal(id) {
         if (!order) throw new Error("Order payment details are unavailable.");
         const canMarkOrderPaid = ["delivered", "completed"].includes(order.status)
             || (order.status !== "cancelled" && order.payment_method === "gcash" && Boolean(order.gcash_payment_reference));
+        const legacyPaymentMethod = !["cash", "gcash"].includes(order.payment_method)
+            ? `<option value="${escapeHtml(order.payment_method)}" selected disabled>Existing: ${escapeHtml(paymentMethodLabel(order.payment_method, true))} (legacy)</option>`
+            : "";
         const choosePaymentStatus = order.payment_status === "partial"
             || (order.payment_status === "paid" && !canMarkOrderPaid);
         modalRoot.innerHTML = `<div class="modal-backdrop" data-business-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="business-modal-title">
@@ -3162,10 +3166,8 @@ async function openOrderPaymentModal(id) {
                 </select></div>
                 <div class="form-group"><label for="order-payment-method">Payment method</label><select class="form-field" id="order-payment-method" name="payment_method">
                     <option value="cash" ${order.payment_method === "cash" ? "selected" : ""}>Cash on delivery (COD)</option>
-                    <option value="card" ${order.payment_method === "card" ? "selected" : ""}>Card</option>
                     <option value="gcash" ${order.payment_method === "gcash" ? "selected" : ""}>GCash</option>
-                    <option value="bank_transfer" ${order.payment_method === "bank_transfer" ? "selected" : ""}>Bank transfer</option>
-                    <option value="other" ${order.payment_method === "other" ? "selected" : ""}>Other</option>
+                    ${legacyPaymentMethod}
                 </select></div>
                 ${order.payment_status === "partial" ? `<p class="payment-reconcile-note">This order has a previously recorded partial payment of ${money(order.amount_paid)}. Choose “Paid in full” or “Unpaid” to reconcile it; the saved amount will not change until you save.</p>` : ""}
                 ${order.payment_method === "gcash" && order.gcash_payment_reference ? `<p class="payment-reconcile-note">Customer GCash reference: <strong>${escapeHtml(order.gcash_payment_reference)}</strong>. ${order.payment_status === "paid" ? "This payment is marked paid." : "Verify it in the GCash account before marking the order paid."}</p>` : ""}
@@ -3747,6 +3749,7 @@ document.addEventListener("submit", async (event) => {
     if (form.id === "order-payment-form") {
         event.preventDefault();
         const payment = Object.fromEntries(new FormData(form).entries());
+        payment.payment_method = form.querySelector("#order-payment-method").value;
         const errorNode = form.querySelector("#business-form-error");
         const button = form.querySelector('[type="submit"]');
         if (!["paid", "unpaid"].includes(payment.payment_status)) {
