@@ -62,6 +62,7 @@ let deliveryZonesError = "";
 let shopStatus = "idle";
 let shopError = "";
 let shopCart = {};
+let shopCartSelection = {};
 let shopSearch = "";
 let shopCategory = "";
 let shopSort = "relevance";
@@ -1759,16 +1760,14 @@ function renderShop()
     const cartEntries = Object.entries(shopCart)
         .map(([id, quantity]) => ({ product: shopProducts.find((item) => String(item.id) === id), quantity }))
         .filter((entry) => entry.product && entry.quantity > 0);
-    const cartTotal = cartEntries.reduce((total, entry) => total + Number(entry.product.price) * entry.quantity, 0);
-    if (!shopDeliveryZones.some((zone) => String(zone.id) === String(checkoutDeliveryZoneId))) {
-        checkoutDeliveryZoneId = "";
-    }
-    const checkoutZone = shopDeliveryZones.find((zone) => String(zone.id) === String(checkoutDeliveryZoneId));
-    const quote = checkoutZone ? quoteDelivery(checkoutZone, cartTotal) : null;
+    const selectedCartEntries = cartEntries.filter(({ product }) => shopCartSelection[product.id] !== false);
+    const selectedCartTotal = selectedCartEntries.reduce((total, entry) => total + Number(entry.product.price) * entry.quantity, 0);
     const cartCount = cartEntries.reduce((total, entry) => total + entry.quantity, 0);
+    const selectedCartCount = selectedCartEntries.reduce((total, entry) => total + entry.quantity, 0);
     const cartRows = cartEntries.length
         ? cartEntries.map(({ product, quantity }) => `<div class="cart-row">
-            <div><strong>${escapeHtml(product.product_name)}${product.variant_name ? ` · ${escapeHtml(product.variant_name)}` : ""}</strong><small>${money(product.price)} each</small></div>
+            <label class="cart-select"><input type="checkbox" data-cart-select="${product.id}" ${shopCartSelection[product.id] === false ? "" : "checked"} aria-label="Select ${escapeHtml(product.product_name)} for checkout"></label>
+            <div class="cart-row-product"><strong>${escapeHtml(product.product_name)}${product.variant_name ? ` · ${escapeHtml(product.variant_name)}` : ""}</strong><small>${money(product.price)} each</small></div>
             <div class="cart-quantity"><button type="button" data-cart-change="${product.id}" data-change="-1" aria-label="Remove one ${escapeHtml(product.product_name)}">−</button>
                 <span>${quantity}</span><button type="button" data-cart-change="${product.id}" data-change="1" aria-label="Add one ${escapeHtml(product.product_name)}">+</button></div>
         </div>`).join("")
@@ -1785,7 +1784,8 @@ function renderShop()
                 <p class="product-rating" aria-label="${Number(product.review_count) ? `${Number(product.average_rating).toFixed(1)} out of 5 stars from ${Number(product.review_count)} reviews` : "No reviews yet"}">${Number(product.review_count) ? `★ ${Number(product.average_rating).toFixed(1)} · ${Number(product.review_count)} ${Number(product.review_count) === 1 ? "review" : "reviews"}` : "No reviews yet"}</p>
                 <div class="shop-product-bottom"><strong>${variants.length > 1 ? `From ${money(Math.min(...variants.map((item) => Number(item.price))))}` : money(onlyVariant?.price ?? product.price)}</strong>
                     <span><button class="button secondary" type="button" data-product-details="${product.id}">Details</button>
-                    <button class="button" type="button" data-cart-add="${product.id}" ${totalStock < 1 ? "disabled" : ""}>${variants.length > 1 ? "Choose options" : "Add to cart"}</button></span></div></div>
+                    <button class="button secondary" type="button" data-cart-add="${product.id}" ${totalStock < 1 ? "disabled" : ""}>${variants.length > 1 ? "Choose options" : "Add to cart"}</button>
+                    <button class="button" type="button" data-buy-now="${product.id}" ${totalStock < 1 ? "disabled" : ""}>Buy now</button></span></div></div>
         </article>`;
         }).join("")
         : `<div class="empty-state"><strong>${shopProducts.length ? "No matching products" : "No products available right now"}</strong><p>${shopProducts.length ? "Try changing the search or category filter." : "Please check back later."}</p></div>`;
@@ -1794,7 +1794,6 @@ function renderShop()
         : shopStatus === "error"
             ? `<div class="content-card"><div class="error-panel">${escapeHtml(shopError)}</div><button class="button secondary" type="button" data-retry-shop>Retry</button></div>`
             : `<div class="shop-product-grid">${productCards}</div>`;
-    const defaultAddress = customerProfile?.addresses?.find((address) => Number(address.is_default)) || customerProfile?.addresses?.[0];
     renderMarkup(`    <div class="shop-toolbar"><div><p class="eyebrow">STOCKWELL STORE</p><h1>Shop products</h1><p class="subtitle">Choose from items currently in stock. ${baseProducts.length} products available.</p></div>
         <nav class="shop-nav" aria-label="Customer navigation"><a class="shop-nav-link active" href="#shop">Shop</a><a class="shop-nav-link" href="#my-orders">My orders</a><a class="shop-nav-link" href="#account">My account</a><span class="cart-count">${cartCount} in cart</span></nav></div>
         <div class="shop-toolbar shop-filters"><input class="form-field" type="search" data-shop-search placeholder="Search products, SKU, or details" aria-label="Search products" value="${escapeHtml(shopSearch)}">
@@ -1802,21 +1801,11 @@ function renderShop()
             <select class="form-field" data-shop-sort aria-label="Sort products"><option value="relevance" ${shopSort === "relevance" ? "selected" : ""}>Most relevant</option><option value="best-selling" ${shopSort === "best-selling" ? "selected" : ""}>Best selling</option><option value="name" ${shopSort === "name" ? "selected" : ""}>Name: A to Z</option><option value="price-low" ${shopSort === "price-low" ? "selected" : ""}>Price: low to high</option><option value="price-high" ${shopSort === "price-high" ? "selected" : ""}>Price: high to low</option></select></div>
         <div class="shop-layout"><section>${productContent}</section>
             <aside class="cart-panel"><div class="cart-panel-heading"><div><p class="eyebrow">YOUR CART</p><h2>Order summary</h2></div><span class="cart-count">${cartCount} items</span></div>
-                <div class="cart-items">${cartRows}</div><div class="cart-total"><span>Total</span><strong>${money(cartTotal)}</strong></div>
-                <form id="checkout-form"><fieldset class="checkout-payment"><legend>Choose payment method</legend><div class="checkout-payment-options">
-                        <label class="checkout-payment-option"><input type="radio" name="payment_method" value="cash" ${checkoutPaymentMethod === "cash" ? "checked" : ""}><span><strong>Cash on delivery</strong><small>Pay when your order arrives.</small></span></label>
-                        ${manualGcashDetails ? `<label class="checkout-payment-option"><input type="radio" name="payment_method" value="gcash" ${checkoutPaymentMethod === "gcash" ? "checked" : ""}><span><strong>GCash QR / manual transfer</strong><small>Transfer after placing your order; submit the reference for verification.</small></span></label>` : ""}
-                    </div></fieldset>
-                    <div class="form-group"><label for="delivery-address-select">Saved delivery address</label><select class="form-field" id="delivery-address-select" data-checkout-address><option value="">Enter a new delivery address</option>${(customerProfile?.addresses || []).map((address) => `<option value="${address.id}" ${Number(address.id) === Number(defaultAddress?.id) ? "selected" : ""}>${escapeHtml(address.label)}${Number(address.is_default) ? " · Default" : ""}</option>`).join("")}</select></div>
-                    <div class="form-group"><label for="checkout-delivery-zone">Delivery area</label><select class="form-field" id="checkout-delivery-zone" name="delivery_zone_id" required ${deliveryQuoteLoading || !shopDeliveryZones.length ? "disabled" : ""}><option value="">${deliveryQuoteLoading ? "Loading delivery areas…" : deliveryZonesError ? "Delivery areas unavailable" : "Choose your delivery area"}</option>${shopDeliveryZones.map((zone) => `<option value="${zone.id}" ${String(zone.id) === String(checkoutDeliveryZoneId) ? "selected" : ""}>${escapeHtml(zone.area_name)} · ${money(zone.fee)}${Number(zone.free_delivery_enabled) ? ` · Free delivery${Number(zone.free_delivery_minimum) > 0 ? ` over ${money(zone.free_delivery_minimum)}` : ""}` : ""}</option>`).join("")}</select><small class="product-description">${deliveryZonesError ? `Delivery areas could not be loaded: ${escapeHtml(deliveryZonesError)}` : "Choose the area matching your destination. Fees are editable estimates; the actual courier charge may vary."}</small></div>
-                    <div class="form-group"><label for="delivery-recipient">Recipient name</label><input class="form-field" id="delivery-recipient" name="recipient_name" maxlength="160" required value="${escapeHtml(defaultAddress?.recipient_name || `${currentUser?.firstname || ""} ${currentUser?.lastname || ""}`.trim())}"></div>
-                    <div class="form-group"><label for="delivery-phone">Contact phone</label><input class="form-field" id="delivery-phone" name="phone" type="tel" maxlength="40" autocomplete="tel" required value="${escapeHtml(defaultAddress?.phone || customerProfile?.phone || "")}"></div>
-                    <div class="form-group"><label for="delivery-address">Delivery address</label><textarea class="form-field" id="delivery-address" name="address" maxlength="500" autocomplete="street-address" required>${escapeHtml(defaultAddress?.address || customerProfile?.address || "")}</textarea></div>
-                    <div class="form-group"><label for="delivery-notes">Delivery notes <span class="optional-label">Optional</span></label><textarea class="form-field" id="delivery-notes" name="delivery_notes" maxlength="1000" placeholder="Landmark, preferred delivery time, or instructions"></textarea></div>
-                    <div class="checkout-total-breakdown" id="checkout-delivery-summary">${quote ? checkoutQuoteMarkup(quote, checkoutPaymentMethod) : '<p class="product-description">Select a delivery area to see the final total.</p>'}</div>
-                    <p class="checkout-note">Stock is reserved when your order is placed. GCash payments remain pending until an admin verifies the transfer. Manage saved addresses in <a href="#account">My account</a>.</p>
-                    <p class="form-error" id="checkout-error" role="alert"></p>
-                    <button class="button checkout-button" type="submit" ${!cartEntries.length || shopStatus !== "ready" || !checkoutZone ? "disabled" : ""}>Place order</button></form></aside></div>`);
+                <label class="cart-select-all"><input type="checkbox" data-cart-select-all ${cartEntries.length && selectedCartEntries.length === cartEntries.length ? "checked" : ""} ${cartEntries.length ? "" : "disabled"}> Select all</label>
+                <div class="cart-items">${cartRows}</div><div class="cart-total"><span>Selected total</span><strong>${money(selectedCartTotal)}</strong></div>
+                <p class="product-description">${selectedCartCount} of ${cartCount} item${cartCount === 1 ? "" : "s"} selected</p>
+                <button class="button checkout-button" type="button" data-checkout-cart ${!selectedCartEntries.length || shopStatus !== "ready" ? "disabled" : ""}>Checkout selected (${selectedCartCount})</button>
+                <p class="checkout-note">Use <strong>Buy now</strong> on a product to check out directly without changing your cart.</p></aside></div>`);
     nextTick(() => {
         const search = app.querySelector("[data-shop-search]");
         if (search) search.addEventListener("input", () => {
@@ -1837,21 +1826,82 @@ function renderShop()
             shopSort = event.target.value;
             renderShop();
         });
-        app.querySelector("[data-checkout-address]")?.addEventListener("change", (event) => {
-            const address = customerProfile?.addresses?.find((item) => String(item.id) === event.target.value);
-            app.querySelector("#delivery-recipient").value = address?.recipient_name || "";
-            app.querySelector("#delivery-phone").value = address?.phone || "";
-            app.querySelector("#delivery-address").value = address?.address || "";
-        });
-        app.querySelector("#checkout-delivery-zone")?.addEventListener("change", (event) => {
-            checkoutDeliveryZoneId = event.target.value;
-            updateCheckoutQuote(cartTotal);
-        });
-        app.querySelectorAll('input[name="payment_method"]').forEach((input) => {
-            input.addEventListener("change", (event) => {
-                checkoutPaymentMethod = event.target.value;
-                updateCheckoutQuote(cartTotal);
-            });
+    });
+}
+
+function openCheckoutModal(requestedItems, mode = "cart")
+{
+    const items = requestedItems
+        .map((item) => ({ product_id: Number(item.product_id), quantity: Number(item.quantity) }))
+        .filter((item) => Number.isInteger(item.product_id) && item.product_id > 0 && Number.isInteger(item.quantity) && item.quantity > 0);
+    const productsById = new Map(shopProducts.map((product) => [Number(product.id), product]));
+    if (!items.length || items.some((item) => {
+        const product = productsById.get(item.product_id);
+        return !product || item.quantity > Number(product.quantity);
+    })) {
+        showToast("One or more selected products are no longer available. Refresh the store and try again.", true);
+        return;
+    }
+
+    const subtotal = items.reduce((total, item) => total + Number(productsById.get(item.product_id).price) * item.quantity, 0);
+    if (!shopDeliveryZones.some((zone) => String(zone.id) === String(checkoutDeliveryZoneId))) checkoutDeliveryZoneId = "";
+    const checkoutZone = shopDeliveryZones.find((zone) => String(zone.id) === String(checkoutDeliveryZoneId));
+    const quote = checkoutZone ? quoteDelivery(checkoutZone, subtotal) : null;
+    const defaultAddress = customerProfile?.addresses?.find((address) => Number(address.is_default))
+        || customerProfile?.addresses?.[0];
+    const orderItemsMarkup = items.map((item) => {
+        const product = productsById.get(item.product_id);
+        return `<div class="checkout-item"><span>${escapeHtml(product.product_name)}${product.variant_name ? ` · ${escapeHtml(product.variant_name)}` : ""} × ${item.quantity}</span><strong>${money(Number(product.price) * item.quantity)}</strong></div>`;
+    }).join("");
+
+    modalRoot.innerHTML = `<div class="modal-backdrop" data-checkout-backdrop><section class="modal modal-wide checkout-modal" role="dialog" aria-modal="true" aria-labelledby="checkout-title">
+        <div class="modal-heading"><div><p class="eyebrow">${mode === "direct" ? "BUY NOW" : "YOUR CART"}</p><h2 id="checkout-title">${mode === "direct" ? "Checkout now" : "Checkout selected items"}</h2><p>${items.reduce((count, item) => count + item.quantity, 0)} item${items.reduce((count, item) => count + item.quantity, 0) === 1 ? "" : "s"} · ${money(subtotal)}</p></div><button class="modal-close" type="button" data-close-checkout aria-label="Close checkout">×</button></div>
+        <div class="checkout-item-list">${orderItemsMarkup}</div>
+        <form id="checkout-form">
+            <fieldset class="checkout-payment"><legend>Choose payment method</legend><div class="checkout-payment-options">
+                <label class="checkout-payment-option"><input type="radio" name="payment_method" value="cash" ${checkoutPaymentMethod === "cash" ? "checked" : ""}><span><strong>Cash on delivery</strong><small>Pay when your order arrives.</small></span></label>
+                ${manualGcashDetails ? `<label class="checkout-payment-option"><input type="radio" name="payment_method" value="gcash" ${checkoutPaymentMethod === "gcash" ? "checked" : ""}><span><strong>GCash QR / manual transfer</strong><small>Transfer after placing your order; submit the reference for verification.</small></span></label>` : ""}
+            </div></fieldset>
+            <div class="form-group"><label for="delivery-address-select">Saved delivery address</label><select class="form-field" id="delivery-address-select" data-checkout-address><option value="">Enter a new delivery address</option>${(customerProfile?.addresses || []).map((address) => `<option value="${address.id}" ${Number(address.id) === Number(defaultAddress?.id) ? "selected" : ""}>${escapeHtml(address.label)}${Number(address.is_default) ? " · Default" : ""}</option>`).join("")}</select></div>
+            <div class="form-group"><label for="checkout-delivery-zone">Delivery area</label><select class="form-field" id="checkout-delivery-zone" name="delivery_zone_id" required ${deliveryQuoteLoading || !shopDeliveryZones.length ? "disabled" : ""}><option value="">${deliveryQuoteLoading ? "Loading delivery areas…" : deliveryZonesError ? "Delivery areas unavailable" : "Choose your delivery area"}</option>${shopDeliveryZones.map((zone) => `<option value="${zone.id}" ${String(zone.id) === String(checkoutDeliveryZoneId) ? "selected" : ""}>${escapeHtml(zone.area_name)} · ${money(zone.fee)}${Number(zone.free_delivery_enabled) ? ` · Free delivery${Number(zone.free_delivery_minimum) > 0 ? ` over ${money(zone.free_delivery_minimum)}` : ""}` : ""}</option>`).join("")}</select><small class="product-description">${deliveryZonesError ? `Delivery areas could not be loaded: ${escapeHtml(deliveryZonesError)}` : "Choose the area matching your destination. Fees are editable estimates; the actual courier charge may vary."}</small></div>
+            <div class="form-grid">
+                <div class="form-group"><label for="delivery-recipient">Recipient name</label><input class="form-field" id="delivery-recipient" name="recipient_name" maxlength="160" required value="${escapeHtml(defaultAddress?.recipient_name || `${currentUser?.firstname || ""} ${currentUser?.lastname || ""}`.trim())}"></div>
+                <div class="form-group"><label for="delivery-phone">Contact phone</label><input class="form-field" id="delivery-phone" name="phone" type="tel" maxlength="40" autocomplete="tel" required value="${escapeHtml(defaultAddress?.phone || customerProfile?.phone || "")}"></div>
+                <div class="form-group full"><label for="delivery-address">Delivery address</label><textarea class="form-field" id="delivery-address" name="address" maxlength="500" autocomplete="street-address" required>${escapeHtml(defaultAddress?.address || customerProfile?.address || "")}</textarea></div>
+                <div class="form-group full"><label for="delivery-notes">Delivery notes <span class="optional-label">Optional</span></label><textarea class="form-field" id="delivery-notes" name="delivery_notes" maxlength="1000" placeholder="Landmark, preferred delivery time, or instructions"></textarea></div>
+            </div>
+            <div class="checkout-total-breakdown" id="checkout-delivery-summary">${quote ? checkoutQuoteMarkup(quote, checkoutPaymentMethod) : '<p class="product-description">Select a delivery area to see the final total.</p>'}</div>
+            <p class="checkout-note">Stock is reserved when your order is placed. GCash payments remain pending until an admin verifies the transfer. Manage saved addresses in <a href="#account">My account</a>.</p>
+            <p class="form-error" id="checkout-error" role="alert"></p>
+            <div class="modal-actions"><button class="button secondary" type="button" data-close-checkout>Back to shop</button><button class="button checkout-button" type="submit" ${!items.length || shopStatus !== "ready" || !checkoutZone ? "disabled" : ""}>Place order</button></div>
+        </form></section></div>`;
+
+    const form = modalRoot.querySelector("#checkout-form");
+    form.dataset.checkoutItems = JSON.stringify(items);
+    form.dataset.checkoutMode = mode;
+    form.dataset.checkoutSubtotal = String(subtotal);
+    form.addEventListener("submit", (event) => submitShopCheckout(event, form));
+    modalRoot.querySelectorAll("[data-close-checkout]").forEach((button) => button.addEventListener("click", () => { modalRoot.innerHTML = ""; }));
+    modalRoot.querySelector("[data-checkout-backdrop]").addEventListener("click", (event) => {
+        if (event.target === event.currentTarget) modalRoot.innerHTML = "";
+    });
+    modalRoot.querySelector(".checkout-modal").addEventListener("keydown", (event) => {
+        if (event.key === "Escape") modalRoot.innerHTML = "";
+    });
+    modalRoot.querySelector("[data-checkout-address]")?.addEventListener("change", (event) => {
+        const address = customerProfile?.addresses?.find((item) => String(item.id) === event.target.value);
+        modalRoot.querySelector("#delivery-recipient").value = address?.recipient_name || "";
+        modalRoot.querySelector("#delivery-phone").value = address?.phone || "";
+        modalRoot.querySelector("#delivery-address").value = address?.address || "";
+    });
+    modalRoot.querySelector("#checkout-delivery-zone")?.addEventListener("change", (event) => {
+        checkoutDeliveryZoneId = event.target.value;
+        updateCheckoutQuote(subtotal);
+    });
+    modalRoot.querySelectorAll('input[name="payment_method"]').forEach((input) => {
+        input.addEventListener("change", (event) => {
+            checkoutPaymentMethod = event.target.value;
+            updateCheckoutQuote(subtotal);
         });
     });
 }
@@ -1882,12 +1932,90 @@ function checkoutQuoteMarkup(quote, paymentMethod = checkoutPaymentMethod)
 function updateCheckoutQuote(subtotal)
 {
     const zone = shopDeliveryZones.find((item) => String(item.id) === String(checkoutDeliveryZoneId));
-    const summary = app.querySelector("#checkout-delivery-summary");
-    const button = app.querySelector('#checkout-form [type="submit"]');
+    const summary = modalRoot.querySelector("#checkout-delivery-summary");
+    const form = modalRoot.querySelector("#checkout-form");
+    const button = form?.querySelector('[type="submit"]');
+    let items = [];
+    try {
+        items = JSON.parse(form?.dataset.checkoutItems || "[]");
+    } catch (error) {
+        showToast(`Checkout items could not be read: ${error.message}`, true);
+    }
+    const hasAvailableItems = Array.isArray(items) && items.length > 0 && items.every((item) => {
+        const product = shopProducts.find((entry) => Number(entry.id) === Number(item.product_id));
+        return product && Number.isInteger(Number(item.quantity))
+            && Number(item.quantity) > 0 && Number(item.quantity) <= Number(product.quantity);
+    });
     if (summary) summary.innerHTML = zone
         ? checkoutQuoteMarkup(quoteDelivery(zone, subtotal), checkoutPaymentMethod)
         : '<p class="product-description">Select a delivery area to see the final total.</p>';
-    if (button) button.disabled = !zone || !Object.keys(shopCart).some((id) => Number(shopCart[id]) > 0) || shopStatus !== "ready";
+    if (button) button.disabled = !zone || !hasAvailableItems || shopStatus !== "ready";
+}
+
+async function submitShopCheckout(event, form)
+{
+    event.preventDefault();
+    const errorNode = form.querySelector("#checkout-error");
+    const button = form.querySelector('[type="submit"]');
+    let items;
+    try {
+        items = JSON.parse(form.dataset.checkoutItems || "[]");
+    } catch (error) {
+        errorNode.textContent = `Checkout items could not be read: ${error.message}`;
+        return;
+    }
+    const formData = new FormData(form);
+    const payload = {
+        items,
+        address: String(formData.get("address") || "").trim(),
+        recipient_name: String(formData.get("recipient_name") || "").trim(),
+        phone: String(formData.get("phone") || "").trim(),
+        delivery_notes: String(formData.get("delivery_notes") || "").trim(),
+        delivery_zone_id: Number(formData.get("delivery_zone_id")),
+        payment_method: String(formData.get("payment_method") || "cash")
+    };
+    if (!Array.isArray(items) || !items.length || !payload.address || !payload.recipient_name || !payload.phone
+        || !Number.isInteger(payload.delivery_zone_id) || payload.delivery_zone_id < 1) {
+        errorNode.textContent = "Choose a delivery area and enter the recipient, phone number, and delivery address.";
+        return;
+    }
+
+    button.disabled = true;
+    errorNode.textContent = "";
+    try {
+        const result = await request(`${API_ROOT}/shop/orders`, {
+            method: "POST",
+            body: JSON.stringify(payload)
+        });
+        if (form.dataset.checkoutMode === "cart") {
+            for (const item of items) {
+                const id = String(item.product_id);
+                const remaining = Number(shopCart[id] || 0) - Number(item.quantity);
+                if (remaining > 0) shopCart[id] = remaining;
+                else {
+                    delete shopCart[id];
+                    delete shopCartSelection[id];
+                }
+            }
+            saveShopCart();
+        }
+        modalRoot.innerHTML = "";
+        customerOrdersStatus = "idle";
+        shopStatus = "idle";
+        if (payload.payment_method === "gcash") {
+            showToast(`Order #${result.data.id} placed. Transfer the total and submit your GCash reference.`);
+            if (result.notification_warning) showToast(result.notification_warning, true);
+            window.location.hash = "#my-orders";
+            await showCustomerOrderDetails(result.data.id);
+            return;
+        }
+        showToast(`Order #${result.data.id} placed. Payment is due on delivery.`);
+        if (result.notification_warning) showToast(result.notification_warning, true);
+        window.location.hash = "#my-orders";
+    } catch (error) {
+        errorNode.textContent = error.message;
+        button.disabled = false;
+    }
 }
 
 function renderCustomerOrders()
@@ -2036,6 +2164,7 @@ function saveShopCart()
 function restoreShopCart()
 {
     if (!currentUser?.id) return;
+    shopCartSelection = {};
     try {
         const saved = JSON.parse(window.localStorage.getItem(cartStorageKey()) || "{}");
         shopCart = saved && typeof saved === "object" && !Array.isArray(saved)
@@ -2110,16 +2239,21 @@ async function showProductDetails(id, purchasedProduct = null)
         <div><dt>Category</dt><dd>${escapeHtml(product.category || "—")}</dd></div><div><dt>SKU</dt><dd data-selected-variant-sku>${escapeHtml(selectedShopVariant.sku || "—")}</dd></div>
         <div><dt>Barcode</dt><dd>${escapeHtml(product.barcode || "—")}</dd></div></dl>
         <section class="product-reviews"><h3>Customer reviews <span>${Number(reviewData.review_count) ? `★ ${Number(reviewData.average_rating).toFixed(1)} · ${Number(reviewData.review_count)}` : "—"}</span></h3>${reviewForm}<div class="product-review-list">${reviewRows}</div></section>
-        <div class="modal-actions"><button class="button secondary" type="button" data-close-shop-modal>Close</button>${openedFromOrder ? "" : `<button class="button" type="button" data-modal-add-cart="${product.id}" data-variant-id="${selectedShopVariant.id}" ${Number(selectedShopVariant.quantity) < 1 || Number(shopCart[selectedShopVariant.id] || 0) >= Number(selectedShopVariant.quantity) ? "disabled" : ""}>Add to cart</button>`}</div>
+        <div class="modal-actions"><button class="button secondary" type="button" data-close-shop-modal>Close</button>${openedFromOrder ? "" : `<button class="button secondary" type="button" data-modal-add-cart="${product.id}" data-variant-id="${selectedShopVariant.id}" ${Number(selectedShopVariant.quantity) < 1 || Number(shopCart[selectedShopVariant.id] || 0) >= Number(selectedShopVariant.quantity) ? "disabled" : ""}>Add to cart</button><button class="button" type="button" data-modal-buy-now data-variant-id="${selectedShopVariant.id}" ${Number(selectedShopVariant.quantity) < 1 ? "disabled" : ""}>Buy now</button>`}</div>
         </section></div>`;
     modalRoot.querySelectorAll("[data-close-shop-modal]").forEach((button) => button.addEventListener("click", () => { modalRoot.innerHTML = ""; }));
     const variantSelect = modalRoot.querySelector("#shop-variant-select");
     const updateSelectedVariant = () => {
         const selected = shopVariants.find((variant) => String(variant.id) === String(variantSelect?.value)) || selectedShopVariant;
         const addButton = modalRoot.querySelector("[data-modal-add-cart]");
+        const buyNowButton = modalRoot.querySelector("[data-modal-buy-now]");
         if (addButton) {
             addButton.dataset.variantId = selected.id;
             addButton.disabled = Number(selected.quantity) < 1 || Number(shopCart[selected.id] || 0) >= Number(selected.quantity);
+        }
+        if (buyNowButton) {
+            buyNowButton.dataset.variantId = selected.id;
+            buyNowButton.disabled = Number(selected.quantity) < 1;
         }
         modalRoot.querySelector("[data-selected-variant-price]").textContent = money(selected.price);
         modalRoot.querySelector("[data-selected-variant-stock]").textContent = `${Number(selected.quantity)} in stock`;
@@ -2131,9 +2265,13 @@ async function showProductDetails(id, purchasedProduct = null)
         const selected = shopProducts.find((item) => String(item.id) === productId);
         if (!selected || Number(shopCart[productId] || 0) >= Number(selected.quantity)) return;
         shopCart[productId] = Number(shopCart[productId] || 0) + 1;
+        if (!(productId in shopCartSelection)) shopCartSelection[productId] = true;
         saveShopCart();
         modalRoot.innerHTML = "";
         renderShop();
+    });
+    modalRoot.querySelector("[data-modal-buy-now]")?.addEventListener("click", (event) => {
+        openCheckoutModal([{ product_id: Number(event.currentTarget.dataset.variantId), quantity: 1 }], "direct");
     });
     modalRoot.querySelector("[data-shop-modal-backdrop]").addEventListener("click", (event) => {
         if (event.target === event.currentTarget) modalRoot.innerHTML = "";
@@ -2334,8 +2472,16 @@ async function loadShopProducts()
         deliveryQuoteLoading = false;
         for (const [id, quantity] of Object.entries(shopCart)) {
             const product = shopProducts.find((item) => String(item.id) === id);
-            if (!product) delete shopCart[id];
-            else if (Number(quantity) > Number(product.quantity)) shopCart[id] = Number(product.quantity);
+            if (!product) {
+                delete shopCart[id];
+                delete shopCartSelection[id];
+            } else if (Number(quantity) > Number(product.quantity)) {
+                if (Number(product.quantity) > 0) shopCart[id] = Number(product.quantity);
+                else {
+                    delete shopCart[id];
+                    delete shopCartSelection[id];
+                }
+            }
         }
         saveShopCart();
         shopStatus = "ready";
@@ -2736,6 +2882,7 @@ async function signOut() {
         products = [];
         shopProducts = [];
         shopCart = {};
+        shopCartSelection = {};
         shopStatus = "idle";
         customerOrders = [];
         customerOrdersStatus = "idle";
@@ -3548,6 +3695,8 @@ app.addEventListener("click", async (event) => {
     const retryOrdersButton = event.target.closest("[data-retry-orders]");
     const addCartButton = event.target.closest("[data-cart-add]");
     const changeCartButton = event.target.closest("[data-cart-change]");
+    const buyNowButton = event.target.closest("[data-buy-now]");
+    const checkoutCartButton = event.target.closest("[data-checkout-cart]");
     const retryUsersButton = event.target.closest("[data-retry-users]");
     const productDetailsButton = event.target.closest("[data-product-details]");
     const customerOrderButton = event.target.closest("[data-customer-order]");
@@ -3616,16 +3765,33 @@ app.addEventListener("click", async (event) => {
             showProductDetails(id);
         } else if (product && Number(shopCart[product.id] || 0) < Number(product.quantity)) {
             shopCart[product.id] = Number(shopCart[product.id] || 0) + 1;
+            shopCartSelection[product.id] = true;
             saveShopCart();
             renderShop();
         }
+    }
+    if (buyNowButton) {
+        const id = buyNowButton.dataset.buyNow;
+        const variants = shopProducts.filter((item) => String(item.parent_product_id || item.id) === id);
+        const product = variants.find((item) => Number(item.quantity) > 0);
+        if (variants.length > 1) showProductDetails(id);
+        else if (product) openCheckoutModal([{ product_id: Number(product.id), quantity: 1 }], "direct");
+    }
+    if (checkoutCartButton) {
+        const items = Object.entries(shopCart)
+            .filter(([id, quantity]) => Number(quantity) > 0 && shopCartSelection[id] !== false)
+            .map(([product_id, quantity]) => ({ product_id: Number(product_id), quantity: Number(quantity) }));
+        openCheckoutModal(items, "cart");
     }
     if (changeCartButton) {
         const id = changeCartButton.dataset.cartChange;
         const nextQuantity = Number(shopCart[id] || 0) + Number(changeCartButton.dataset.change);
         const product = shopProducts.find((item) => String(item.id) === id);
         if (nextQuantity > 0 && product && nextQuantity <= Number(product.quantity)) shopCart[id] = nextQuantity;
-        else delete shopCart[id];
+        else {
+            delete shopCart[id];
+            delete shopCartSelection[id];
+        }
         saveShopCart();
         renderShop();
     }
@@ -3726,6 +3892,18 @@ app.addEventListener("click", async (event) => {
     if (reportRangeButton) loadReportRange(reportRangeButton.dataset.reportRange);
 });
 
+app.addEventListener("change", (event) => {
+    const checkbox = event.target.closest("[data-cart-select]");
+    const selectAll = event.target.closest("[data-cart-select-all]");
+    if (checkbox) {
+        shopCartSelection[checkbox.dataset.cartSelect] = checkbox.checked;
+        renderShop();
+    } else if (selectAll) {
+        for (const id of Object.keys(shopCart)) shopCartSelection[id] = selectAll.checked;
+        renderShop();
+    }
+});
+
 document.querySelector("[data-logout]").addEventListener("click", signOut);
 
 app.addEventListener("submit", async (event) => {
@@ -3782,6 +3960,7 @@ app.addEventListener("submit", async (event) => {
         });
         if (typeof result.csrf_token === "string") csrfToken = result.csrf_token;
         currentUser = result.user;
+        if (currentUser?.role === "customer") restoreShopCart();
         authStatus = "authenticated";
         authMode = "login";
         googleAuthError = "";
@@ -4011,55 +4190,6 @@ document.addEventListener("submit", async (event) => {
         } catch (error) {
             errorNode.textContent = error.message;
             button.disabled = false;
-        }
-        return;
-    }
-    if (form.id === "checkout-form") {
-        event.preventDefault();
-        const errorNode = form.querySelector("#checkout-error");
-        const button = form.querySelector('[type="submit"]');
-        const items = Object.entries(shopCart)
-            .filter(([, quantity]) => quantity > 0)
-            .map(([product_id, quantity]) => ({ product_id: Number(product_id), quantity }));
-        const formData = new FormData(form);
-        const payload = {
-            items,
-            address: String(formData.get("address") || "").trim(),
-            recipient_name: String(formData.get("recipient_name") || "").trim(),
-            phone: String(formData.get("phone") || "").trim(),
-            delivery_notes: String(formData.get("delivery_notes") || "").trim(),
-            delivery_zone_id: Number(formData.get("delivery_zone_id")),
-            payment_method: String(formData.get("payment_method") || "cash")
-        };
-        if (!items.length || !payload.address || !payload.recipient_name || !payload.phone || !Number.isInteger(payload.delivery_zone_id) || payload.delivery_zone_id < 1) {
-            errorNode.textContent = "Add at least one product, choose a delivery area, and enter the recipient, phone number, and delivery address.";
-            return;
-        }
-        button.disabled = true;
-        errorNode.textContent = "";
-        try {
-            const result = await request(`${API_ROOT}/shop/orders`, {
-                method: "POST",
-                body: JSON.stringify(payload)
-            });
-            shopCart = {};
-            saveShopCart();
-            customerOrdersStatus = "idle";
-            shopStatus = "idle";
-            if (payload.payment_method === "gcash") {
-                showToast(`Order #${result.data.id} placed. Transfer the total and submit your GCash reference.`);
-                if (result.notification_warning) showToast(result.notification_warning, true);
-                window.location.hash = "#my-orders";
-                await showCustomerOrderDetails(result.data.id);
-                return;
-            }
-            showToast(`Order #${result.data.id} placed. Payment is due on delivery.`);
-            if (result.notification_warning) showToast(result.notification_warning, true);
-            window.location.hash = "#my-orders";
-        } catch (error) {
-            const currentErrorNode = document.querySelector("#checkout-error");
-            if (currentErrorNode) currentErrorNode.textContent = error.message;
-            if (button.isConnected) button.disabled = false;
         }
         return;
     }
