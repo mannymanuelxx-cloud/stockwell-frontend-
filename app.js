@@ -535,9 +535,11 @@ function productRows(items) {
 
     return items.map((product) => {
         const initial = escapeHtml((product.product_name || "?").trim().charAt(0).toUpperCase());
+        const hasVariants = !product.parent_product_id && items.some((item) => String(item.parent_product_id) === String(product.id));
+        const productLabel = `${product.product_name}${product.variant_name ? ` · ${product.variant_name}` : hasVariants ? " · Standard" : ""}`;
         return `<tr>
             <td><div class="product-cell">${productImageMarkup(product, "admin-product-thumbnail")}
-                <span><span class="product-name">${escapeHtml(product.product_name)}</span>
+                <span><span class="product-name">${escapeHtml(productLabel)}</span>
                 <span class="product-description">${escapeHtml(product.description || "No description")}</span></span>
             </div></td>
             <td>${money(product.price)}</td>
@@ -545,9 +547,11 @@ function productRows(items) {
             <td>${stockStatus(Number(product.quantity) || 0, productReorderLevel(product))}</td>
             <td><div class="row-actions">
                 <button class="icon-button" type="button" data-view="${escapeHtml(product.id)}" aria-label="View ${escapeHtml(product.product_name)}">${icon("view")}</button>
-                <button class="icon-button" type="button" data-edit="${escapeHtml(product.id)}" aria-label="Edit ${escapeHtml(product.product_name)}">${icon("edit")}</button>
+                ${product.parent_product_id ? "" : `<button class="icon-button" type="button" data-edit="${escapeHtml(product.id)}" aria-label="Edit ${escapeHtml(product.product_name)}">${icon("edit")}</button>`}
                 <button class="icon-button" type="button" data-adjust-stock="${escapeHtml(product.id)}" aria-label="Adjust stock for ${escapeHtml(product.product_name)}">${icon("adjust")}</button>
-                <button class="icon-button delete" type="button" data-delete="${escapeHtml(product.id)}" aria-label="Delete ${escapeHtml(product.product_name)}">${icon("delete")}</button>
+                ${product.parent_product_id
+                    ? `<button class="icon-button delete" type="button" data-delete-variant="${escapeHtml(product.parent_product_id)}" data-variant-id="${escapeHtml(product.id)}" aria-label="Delete ${escapeHtml(productLabel)}">${icon("delete")}</button>`
+                    : `<button class="icon-button delete" type="button" data-delete="${escapeHtml(product.id)}" aria-label="Delete ${escapeHtml(productLabel)}">${icon("delete")}</button>`}
             </div></td>
         </tr>`;
     }).join("");
@@ -1717,9 +1721,10 @@ function renderResetPassword(errorMessage = "") {
 function renderShop()
 {
     if (!manualGcashDetails && checkoutPaymentMethod === "gcash") checkoutPaymentMethod = "cash";
-    const categories = [...new Set(shopProducts.map((product) => String(product.category || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const baseProducts = shopProducts.filter((product) => !product.parent_product_id);
+    const categories = [...new Set(baseProducts.map((product) => String(product.category || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
     const searchQuery = shopSearch.trim().toLowerCase();
-    const visibleProducts = shopProducts.filter((product) => {
+    const visibleProducts = baseProducts.filter((product) => {
         return (!searchQuery || [product.product_name, product.description, product.category, product.sku, product.barcode]
             .some((value) => String(value || "").toLowerCase().includes(searchQuery)))
             && (!shopCategory || String(product.category || "") === shopCategory);
@@ -1763,21 +1768,26 @@ function renderShop()
     const cartCount = cartEntries.reduce((total, entry) => total + entry.quantity, 0);
     const cartRows = cartEntries.length
         ? cartEntries.map(({ product, quantity }) => `<div class="cart-row">
-            <div><strong>${escapeHtml(product.product_name)}</strong><small>${money(product.price)} each</small></div>
+            <div><strong>${escapeHtml(product.product_name)}${product.variant_name ? ` · ${escapeHtml(product.variant_name)}` : ""}</strong><small>${money(product.price)} each</small></div>
             <div class="cart-quantity"><button type="button" data-cart-change="${product.id}" data-change="-1" aria-label="Remove one ${escapeHtml(product.product_name)}">−</button>
                 <span>${quantity}</span><button type="button" data-cart-change="${product.id}" data-change="1" aria-label="Add one ${escapeHtml(product.product_name)}">+</button></div>
         </div>`).join("")
         : '<p class="cart-empty">Your cart is empty. Add a product to get started.</p>';
     const productCards = visibleProducts.length
-        ? visibleProducts.map((product) => `<article class="shop-product-card">
+        ? visibleProducts.map((product) => {
+            const variants = shopProducts.filter((item) => String(item.parent_product_id || item.id) === String(product.id));
+            const totalStock = variants.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
+            const onlyVariant = variants.length === 1 ? variants[0] : null;
+            return `<article class="shop-product-card">
             ${productImageMarkup(product, "shop-product-image")}
-            <div class="shop-product-info"><span class="shop-stock">${Number(product.quantity)} available</span>
+            <div class="shop-product-info"><span class="shop-stock">${totalStock} available${variants.length > 1 ? ` · ${variants.length} options` : ""}</span>
                 <h3>${escapeHtml(product.product_name)}</h3><p>${escapeHtml(product.description || "A Stockwell store favorite.")}</p>
                 <p class="product-rating" aria-label="${Number(product.review_count) ? `${Number(product.average_rating).toFixed(1)} out of 5 stars from ${Number(product.review_count)} reviews` : "No reviews yet"}">${Number(product.review_count) ? `★ ${Number(product.average_rating).toFixed(1)} · ${Number(product.review_count)} ${Number(product.review_count) === 1 ? "review" : "reviews"}` : "No reviews yet"}</p>
-                <div class="shop-product-bottom"><strong>${money(product.price)}</strong>
+                <div class="shop-product-bottom"><strong>${variants.length > 1 ? `From ${money(Math.min(...variants.map((item) => Number(item.price))))}` : money(onlyVariant?.price ?? product.price)}</strong>
                     <span><button class="button secondary" type="button" data-product-details="${product.id}">Details</button>
-                    <button class="button" type="button" data-cart-add="${product.id}" ${Number(shopCart[product.id]) >= Number(product.quantity) ? "disabled" : ""}>Add to cart</button></span></div></div>
-        </article>`).join("")
+                    <button class="button" type="button" data-cart-add="${product.id}" ${totalStock < 1 ? "disabled" : ""}>${variants.length > 1 ? "Choose options" : "Add to cart"}</button></span></div></div>
+        </article>`;
+        }).join("")
         : `<div class="empty-state"><strong>${shopProducts.length ? "No matching products" : "No products available right now"}</strong><p>${shopProducts.length ? "Try changing the search or category filter." : "Please check back later."}</p></div>`;
     const productContent = shopStatus === "loading"
         ? '<div class="content-card loading">Loading the store…</div>'
@@ -1785,7 +1795,7 @@ function renderShop()
             ? `<div class="content-card"><div class="error-panel">${escapeHtml(shopError)}</div><button class="button secondary" type="button" data-retry-shop>Retry</button></div>`
             : `<div class="shop-product-grid">${productCards}</div>`;
     const defaultAddress = customerProfile?.addresses?.find((address) => Number(address.is_default)) || customerProfile?.addresses?.[0];
-    renderMarkup(`<div class="shop-toolbar"><div><p class="eyebrow">STOCKWELL STORE</p><h1>Shop products</h1><p class="subtitle">Choose from items currently in stock. ${shopProducts.length} products available.</p></div>
+    renderMarkup(`    <div class="shop-toolbar"><div><p class="eyebrow">STOCKWELL STORE</p><h1>Shop products</h1><p class="subtitle">Choose from items currently in stock. ${baseProducts.length} products available.</p></div>
         <nav class="shop-nav" aria-label="Customer navigation"><a class="shop-nav-link active" href="#shop">Shop</a><a class="shop-nav-link" href="#my-orders">My orders</a><a class="shop-nav-link" href="#account">My account</a><span class="cart-count">${cartCount} in cart</span></nav></div>
         <div class="shop-toolbar shop-filters"><input class="form-field" type="search" data-shop-search placeholder="Search products, SKU, or details" aria-label="Search products" value="${escapeHtml(shopSearch)}">
             <select class="form-field" data-shop-category aria-label="Filter by category"><option value="">All categories</option>${categories.map((category) => `<option value="${escapeHtml(category)}" ${category === shopCategory ? "selected" : ""}>${escapeHtml(category)}</option>`).join("")}</select>
@@ -2078,6 +2088,10 @@ async function showProductDetails(id, purchasedProduct = null)
             <p>${escapeHtml(review.review)}</p><small>Verified purchase · ${escapeHtml(formatCustomerDate(review.created_at))}</small></article>`).join("")
         : '<p class="cart-empty">No reviews yet. Verified buyers can share their experience here.</p>';
     const ownReview = reviewData.own_review || {};
+    const shopVariants = openedFromOrder
+        ? []
+        : shopProducts.filter((item) => String(item.parent_product_id || item.id) === String(product.id));
+    const selectedShopVariant = shopVariants.find((item) => Number(item.quantity) > 0) || shopVariants[0] || product;
     const reviewForm = reviewData.can_review
         ? `<form id="customer-review-form" data-product-id="${Number(product.id)}" data-purchased-context="${openedFromOrder ? "true" : "false"}" data-product-name="${escapeHtml(product.product_name)}" data-product-image="${escapeHtml(product.image_url || "")}" data-product-category="${escapeHtml(product.category || "")}" data-unit-price="${Number(purchasedProduct?.unit_price ?? product.price ?? 0)}" data-purchased-quantity="${Number(purchasedProduct?.quantity ?? 0)}"><h4>${ownReview.id ? "Update your review" : "Write a review"}</h4>
             <div class="form-group"><label for="review-rating">Rating</label><select class="form-field" id="review-rating" name="rating" required>${[5, 4, 3, 2, 1].map((rating) => `<option value="${rating}" ${Number(ownReview.rating || 5) === rating ? "selected" : ""}>${rating} out of 5 stars</option>`).join("")}</select></div>
@@ -2091,16 +2105,31 @@ async function showProductDetails(id, purchasedProduct = null)
         <div class="modal-heading"><div><p class="eyebrow">${escapeHtml(product.category || "STOCKWELL PRODUCT")}</p><h2 id="shop-product-title">${escapeHtml(product.product_name)}</h2></div><button class="modal-close" type="button" data-close-shop-modal aria-label="Close dialog">×</button></div>
         ${productImageMarkup(product, "shop-detail-image")}
         <p>${escapeHtml(product.description || "No additional description is available.")}</p>
-        <dl class="product-specifications"><div><dt>${openedFromOrder ? "Paid price" : "Price"}</dt><dd>${money(openedFromOrder ? purchasedProduct.unit_price : product.price)}</dd></div><div><dt>${openedFromOrder ? "Purchased" : "Availability"}</dt><dd>${openedFromOrder ? `${Number(purchasedProduct.quantity)} ${Number(purchasedProduct.quantity) === 1 ? "unit" : "units"}` : `${Number(product.quantity)} in stock`}</dd></div>
-        <div><dt>Category</dt><dd>${escapeHtml(product.category || "—")}</dd></div><div><dt>SKU</dt><dd>${escapeHtml(product.sku || "—")}</dd></div>
+        ${shopVariants.length > 1 ? `<div class="form-group"><label for="shop-variant-select">Choose an option</label><select class="form-field" id="shop-variant-select">${shopVariants.map((variant) => `<option value="${variant.id}" ${String(variant.id) === String(selectedShopVariant.id) ? "selected" : ""} ${Number(variant.quantity) < 1 ? "disabled" : ""}>${escapeHtml(variant.variant_name || "Standard")} · ${money(variant.price)} · ${Number(variant.quantity)} in stock</option>`).join("")}</select></div>` : ""}
+        <dl class="product-specifications"><div><dt>${openedFromOrder ? "Paid price" : "Price"}</dt><dd data-selected-variant-price>${money(openedFromOrder ? purchasedProduct.unit_price : selectedShopVariant.price)}</dd></div><div><dt>${openedFromOrder ? "Purchased" : "Availability"}</dt><dd data-selected-variant-stock>${openedFromOrder ? `${Number(purchasedProduct.quantity)} ${Number(purchasedProduct.quantity) === 1 ? "unit" : "units"}` : `${Number(selectedShopVariant.quantity)} in stock`}</dd></div>
+        <div><dt>Category</dt><dd>${escapeHtml(product.category || "—")}</dd></div><div><dt>SKU</dt><dd data-selected-variant-sku>${escapeHtml(selectedShopVariant.sku || "—")}</dd></div>
         <div><dt>Barcode</dt><dd>${escapeHtml(product.barcode || "—")}</dd></div></dl>
         <section class="product-reviews"><h3>Customer reviews <span>${Number(reviewData.review_count) ? `★ ${Number(reviewData.average_rating).toFixed(1)} · ${Number(reviewData.review_count)}` : "—"}</span></h3>${reviewForm}<div class="product-review-list">${reviewRows}</div></section>
-        <div class="modal-actions"><button class="button secondary" type="button" data-close-shop-modal>Close</button>${openedFromOrder ? "" : `<button class="button" type="button" data-modal-add-cart="${product.id}" ${Number(shopCart[product.id]) >= Number(product.quantity) ? "disabled" : ""}>Add to cart</button>`}</div>
+        <div class="modal-actions"><button class="button secondary" type="button" data-close-shop-modal>Close</button>${openedFromOrder ? "" : `<button class="button" type="button" data-modal-add-cart="${product.id}" data-variant-id="${selectedShopVariant.id}" ${Number(selectedShopVariant.quantity) < 1 || Number(shopCart[selectedShopVariant.id] || 0) >= Number(selectedShopVariant.quantity) ? "disabled" : ""}>Add to cart</button>`}</div>
         </section></div>`;
     modalRoot.querySelectorAll("[data-close-shop-modal]").forEach((button) => button.addEventListener("click", () => { modalRoot.innerHTML = ""; }));
-    modalRoot.querySelector("[data-modal-add-cart]")?.addEventListener("click", () => {
-        const productId = String(product.id);
-        if (Number(shopCart[productId] || 0) >= Number(product.quantity)) return;
+    const variantSelect = modalRoot.querySelector("#shop-variant-select");
+    const updateSelectedVariant = () => {
+        const selected = shopVariants.find((variant) => String(variant.id) === String(variantSelect?.value)) || selectedShopVariant;
+        const addButton = modalRoot.querySelector("[data-modal-add-cart]");
+        if (addButton) {
+            addButton.dataset.variantId = selected.id;
+            addButton.disabled = Number(selected.quantity) < 1 || Number(shopCart[selected.id] || 0) >= Number(selected.quantity);
+        }
+        modalRoot.querySelector("[data-selected-variant-price]").textContent = money(selected.price);
+        modalRoot.querySelector("[data-selected-variant-stock]").textContent = `${Number(selected.quantity)} in stock`;
+        modalRoot.querySelector("[data-selected-variant-sku]").textContent = selected.sku || "—";
+    };
+    variantSelect?.addEventListener("change", updateSelectedVariant);
+    modalRoot.querySelector("[data-modal-add-cart]")?.addEventListener("click", (event) => {
+        const productId = String(event.currentTarget.dataset.variantId);
+        const selected = shopProducts.find((item) => String(item.id) === productId);
+        if (!selected || Number(shopCart[productId] || 0) >= Number(selected.quantity)) return;
         shopCart[productId] = Number(shopCart[productId] || 0) + 1;
         saveShopCart();
         modalRoot.innerHTML = "";
@@ -2733,6 +2762,12 @@ function showToast(message, isError = false) {
 
 async function openProductModal(product = null) {
     const editing = Boolean(product);
+    let savedProductId = product?.id || null;
+    let productCreated = editing;
+    const productVariants = editing
+        ? products.filter((item) => String(item.parent_product_id) === String(product.id))
+        : [];
+    const categoryOptions = ["Audio", "Cables", "Chargers", "Computer Accessories", "Computers", "Keyboards", "Monitors & Stands", "Networking", "Power", "Storage"];
     modalRoot.innerHTML = `<div class="modal-backdrop" data-backdrop>
         <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
             <div class="modal-heading"><div><h2 id="modal-title">${editing ? "Edit product" : "Add product"}</h2>
@@ -2742,7 +2777,7 @@ async function openProductModal(product = null) {
                 <div class="form-grid">
                     <div class="form-group full"><label for="product-name">Product name</label>
                         <input class="form-field" id="product-name" name="product_name" maxlength="255" required value="${escapeHtml(product?.product_name || "")}"></div>
-                    <div class="form-group"><label for="product-category">Category</label><input class="form-field" id="product-category" name="category" maxlength="120" value="${escapeHtml(product?.category || "")}" placeholder="e.g. Accessories"></div>
+                    <div class="form-group"><label for="product-category">Category</label><input class="form-field" id="product-category" name="category" list="product-category-options" maxlength="120" value="${escapeHtml(product?.category || "")}" placeholder="Choose or enter a category"><datalist id="product-category-options">${categoryOptions.map((category) => `<option value="${category}">`).join("")}</datalist></div>
                     <div class="form-group"><label for="product-sku">SKU</label><input class="form-field" id="product-sku" name="sku" maxlength="80" value="${escapeHtml(product?.sku || "")}" placeholder="e.g. LAP-001"></div>
                     <div class="form-group"><label for="product-barcode">Barcode</label><input class="form-field" id="product-barcode" name="barcode" maxlength="80" value="${escapeHtml(product?.barcode || "")}"></div>
                     <div class="form-group"><label for="product-reorder">Reorder level</label><input class="form-field" id="product-reorder" name="reorder_level" type="number" min="0" step="1" value="${escapeHtml(product?.reorder_level ?? 5)}"></div>
@@ -2757,10 +2792,22 @@ async function openProductModal(product = null) {
                     <div class="form-group"><label for="product-estimated-cost">Estimated unit cost (PHP)</label>
                         <input class="form-field" id="product-estimated-cost" name="estimated_unit_cost" type="number" min="0.01" step="0.01" value="${escapeHtml(product?.estimated_unit_cost ?? "")}">
                         <small class="product-description">Unverified demo estimate using 65% of retail price. This estimate takes priority over demo purchase records; replace it with a verified cost when available.</small></div>
-                    <div class="form-group"><label for="product-quantity">Quantity</label>
+                    <div class="form-group"><label for="product-quantity">${productVariants.length ? "Standard option quantity" : "Quantity"}</label>
                         <input class="form-field" id="product-quantity" name="quantity" type="number" min="0" step="1" required value="${escapeHtml(product?.quantity ?? 0)}" ${editing ? "readonly" : ""}>
                         ${editing ? '<small class="product-description">Use Adjust stock to record a quantity change and its reason.</small>' : ""}</div>
                 </div>
+                ${product?.parent_product_id ? "" : `<section class="content-card product-variant-editor"><h3>Product options</h3><p class="product-description">Each option has its own price, SKU, and inventory. Existing stock stays on the Standard option until you adjust it.</p>
+                    ${productVariants.length ? `<div class="product-variant-row"><span><strong>Standard</strong><small>${money(product.price)} · ${Number(product.quantity)} in stock · ${escapeHtml(product.sku || "Base SKU")}</small></span><span class="product-description">Base product</span></div>` : ""}
+                    <div class="product-variant-list">${productVariants.map((variant) => `<div class="product-variant-row" data-variant-row="${variant.id}">
+                        <input class="form-field" data-existing-variant-name maxlength="120" aria-label="Option name" value="${escapeHtml(variant.variant_name)}">
+                        <input class="form-field" data-existing-variant-price type="number" min="0.01" step="0.01" aria-label="Option price" value="${escapeHtml(variant.price)}">
+                        <input class="form-field" data-existing-variant-sku maxlength="80" aria-label="Option SKU" placeholder="SKU" value="${escapeHtml(variant.sku || "")}">
+                        <small>${Number(variant.quantity)} in stock · use Adjust stock to change quantity</small>
+                        <button class="button secondary" type="button" data-save-variant="${variant.id}">Save option</button>
+                        <button class="button danger" type="button" data-remove-variant="${variant.id}" ${Number(variant.quantity) > 0 ? 'disabled title="Adjust its stock to zero before removing"' : ""}>Remove</button>
+                    </div>`).join("")}</div>
+                    <div class="product-variant-new-list"></div><button class="button secondary" type="button" data-add-variant-row>Add option</button>
+                </section>`}
                 <p class="form-error" id="form-error" role="alert"></p>
                 <div class="modal-actions"><button class="button secondary" type="button" data-close-modal>Cancel</button>
                     <button class="button" type="submit">${editing ? "Save changes" : "Add product"}</button></div>
@@ -2784,6 +2831,55 @@ async function openProductModal(product = null) {
 
     modalRoot.querySelectorAll("[data-close-modal]").forEach((button) => {
         button.addEventListener("click", closeProductModal);
+    });
+    modalRoot.querySelector("[data-add-variant-row]")?.addEventListener("click", () => {
+        const row = document.createElement("div");
+        row.className = "product-variant-new-row";
+        row.innerHTML = `<input class="form-field" data-variant-name maxlength="120" placeholder="Option name, e.g. Black / 256GB" aria-label="Option name" required>
+            <input class="form-field" data-variant-price type="number" min="0.01" step="0.01" value="${escapeHtml(product?.price || "")}" aria-label="Option price" required>
+            <input class="form-field" data-variant-quantity type="number" min="0" step="1" value="0" aria-label="Opening stock" required>
+            <input class="form-field" data-variant-sku maxlength="80" placeholder="SKU (optional)" aria-label="Option SKU">
+            <button class="button danger" type="button" data-remove-variant-row>Remove</button>`;
+        modalRoot.querySelector(".product-variant-new-list").append(row);
+        row.querySelector("[data-variant-name]").focus();
+    });
+    modalRoot.querySelector(".product-variant-new-list")?.addEventListener("click", (event) => {
+        if (event.target.closest("[data-remove-variant-row]")) event.target.closest(".product-variant-new-row").remove();
+    });
+    modalRoot.querySelector(".product-variant-list")?.addEventListener("click", async (event) => {
+        const saveButton = event.target.closest("[data-save-variant]");
+        if (saveButton) {
+            const row = saveButton.closest("[data-variant-row]");
+            try {
+                await request(`${API_PRODUCTS}/${encodeURIComponent(product.id)}/variants/${encodeURIComponent(saveButton.dataset.saveVariant)}`, {
+                    method: "PUT",
+                    body: JSON.stringify({
+                        variant_name: row.querySelector("[data-existing-variant-name]").value.trim(),
+                        price: Number(row.querySelector("[data-existing-variant-price]").value),
+                        sku: row.querySelector("[data-existing-variant-sku]").value.trim()
+                    })
+                });
+                await loadProducts();
+                openProductModal(products.find((item) => String(item.id) === String(product.id)) || product);
+            } catch (error) {
+                showToast(error.message, true);
+            }
+            return;
+        }
+        const button = event.target.closest("[data-remove-variant]");
+        if (!button || button.disabled) return;
+        if (!await confirmAction("Remove this option? It must have no stock or transaction history.", {
+            title: "Remove product option",
+            confirmLabel: "Remove",
+            danger: true
+        })) return;
+        try {
+            await request(`${API_PRODUCTS}/${encodeURIComponent(product.id)}/variants/${encodeURIComponent(button.dataset.removeVariant)}`, { method: "DELETE" });
+            await loadProducts();
+            openProductModal(products.find((item) => String(item.id) === String(product.id)) || product);
+        } catch (error) {
+            showToast(error.message, true);
+        }
     });
     modalRoot.querySelector("[data-backdrop]").addEventListener("click", (event) => {
         if (event.target === event.currentTarget) closeProductModal();
@@ -2846,10 +2942,20 @@ async function openProductModal(product = null) {
             category: String(formData.get("category") || "").trim(), sku: String(formData.get("sku") || "").trim(), barcode: String(formData.get("barcode") || "").trim(), reorder_level: Number(formData.get("reorder_level")), supplier_id: Number(formData.get("supplier_id")) || null,
             image_url: String(formData.get("image_url") || "").trim()
         };
+        const newVariants = [...form.querySelectorAll(".product-variant-new-row")].map((row) => ({
+            row,
+            data: {
+                variant_name: String(row.querySelector("[data-variant-name]").value || "").trim(),
+                price: Number(row.querySelector("[data-variant-price]").value),
+                quantity: Number(row.querySelector("[data-variant-quantity]").value),
+                sku: String(row.querySelector("[data-variant-sku]").value || "").trim()
+            }
+        }));
         const errorNode = modalRoot.querySelector("#form-error");
         if (!payload.product_name || !Number.isFinite(payload.price) || payload.price <= 0
             || (payload.estimated_unit_cost !== null && (!Number.isFinite(payload.estimated_unit_cost) || payload.estimated_unit_cost <= 0))
-            || !Number.isInteger(payload.quantity) || payload.quantity < 0 || !Number.isInteger(payload.reorder_level) || payload.reorder_level < 0) {
+            || !Number.isInteger(payload.quantity) || payload.quantity < 0 || !Number.isInteger(payload.reorder_level) || payload.reorder_level < 0
+            || newVariants.some(({ data }) => !data.variant_name || !Number.isFinite(data.price) || data.price <= 0 || !Number.isInteger(data.quantity) || data.quantity < 0)) {
             errorNode.textContent = "Enter a product name, a positive price, and a whole-number quantity of zero or more.";
             return;
         }
@@ -2857,16 +2963,24 @@ async function openProductModal(product = null) {
         const submitButton = form.querySelector('[type="submit"]');
         submitButton.disabled = true;
         try {
-            if (editing) {
-                await request(`${API_PRODUCTS}/${encodeURIComponent(product.id)}`, {
+            if (productCreated) {
+                await request(`${API_PRODUCTS}/${encodeURIComponent(savedProductId)}`, {
                     method: "PUT",
                     body: JSON.stringify(payload)
                 });
-                showToast("Product updated.");
             } else {
-                await request(API_PRODUCTS, { method: "POST", body: JSON.stringify(payload) });
-                showToast("Product added.");
+                const result = await request(API_PRODUCTS, { method: "POST", body: JSON.stringify(payload) });
+                savedProductId = result?.data?.id;
+                productCreated = true;
             }
+            for (const variant of newVariants) {
+                await request(`${API_PRODUCTS}/${encodeURIComponent(savedProductId)}/variants`, {
+                    method: "POST",
+                    body: JSON.stringify(variant.data)
+                });
+                variant.row.remove();
+            }
+            showToast(`${editing ? "Product updated" : "Product added"}${newVariants.length ? ` with ${newVariants.length} option${newVariants.length === 1 ? "" : "s"}` : ""}.`);
             closeProductModal();
             await loadProducts();
         } catch (error) {
@@ -2887,7 +3001,7 @@ function openStockAdjustmentModal(id) {
         return;
     }
     modalRoot.innerHTML = `<div class="modal-backdrop" data-stock-modal-backdrop><section class="modal" role="dialog" aria-modal="true" aria-labelledby="stock-adjustment-title">
-        <div class="modal-heading"><div><h2 id="stock-adjustment-title">Adjust stock</h2><p>${escapeHtml(product.product_name)} · currently ${Number(product.quantity) || 0} units</p></div>
+        <div class="modal-heading"><div><h2 id="stock-adjustment-title">Adjust stock</h2><p>${escapeHtml(product.product_name)}${product.variant_name ? ` · ${escapeHtml(product.variant_name)}` : ""} · currently ${Number(product.quantity) || 0} units</p></div>
             <button class="modal-close" type="button" data-close-stock-modal aria-label="Close dialog">×</button></div>
         <form id="stock-adjustment-form" data-product-id="${escapeHtml(product.id)}">
             <div class="form-group"><label for="stock-quantity-change">Quantity change</label><input class="form-field" id="stock-quantity-change" name="quantity_change" type="number" min="-1000000" max="1000000" step="1" required placeholder="Example: 5 or -2"></div>
@@ -2977,7 +3091,7 @@ async function openProductDetails(id) {
         if (!modalRoot.querySelector(".modal")) return;
         modalRoot.innerHTML = `<div class="modal-backdrop" data-backdrop>
             <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-                <div class="modal-heading"><div><p class="eyebrow">Product details</p><h2 id="modal-title">${escapeHtml(product.product_name)}</h2>
+                <div class="modal-heading"><div><p class="eyebrow">Product details</p><h2 id="modal-title">${escapeHtml(product.product_name)}${product.variant_name ? ` · ${escapeHtml(product.variant_name)}` : ""}</h2>
                     <p>Record #${escapeHtml(product.id)}</p></div><button class="modal-close" type="button" data-close-modal aria-label="Close dialog">×</button></div>
                 <dl class="details-grid">
                     <div><dt>Description</dt><dd>${escapeHtml(product.description || "No description")}</dd></div>
@@ -2991,14 +3105,21 @@ async function openProductDetails(id) {
                 </dl>
                 <div class="modal-actions"><button class="button secondary" type="button" data-close-modal>Close</button>
                     <button class="button secondary" type="button" data-detail-adjust-stock="${escapeHtml(product.id)}">Adjust stock</button>
-                    <button class="button" type="button" data-detail-edit="${escapeHtml(product.id)}">Edit product</button></div>
+                    <button class="button" type="button" data-detail-edit="${escapeHtml(product.parent_product_id || product.id)}">${product.parent_product_id ? "Edit parent options" : "Edit product"}</button></div>
             </section></div>`;
         modalRoot.querySelectorAll("[data-close-modal]").forEach((button) => button.addEventListener("click", closeProductModal));
         modalRoot.querySelector("[data-backdrop]").addEventListener("click", (event) => {
             if (event.target === event.currentTarget) closeProductModal();
         });
         modalRoot.querySelector("[data-detail-adjust-stock]").addEventListener("click", () => openStockAdjustmentModal(product.id));
-        modalRoot.querySelector("[data-detail-edit]").addEventListener("click", () => openProductModal(product));
+        modalRoot.querySelector("[data-detail-edit]").addEventListener("click", () => {
+            const editableProduct = products.find((item) => String(item.id) === String(product.parent_product_id || product.id));
+            if (!editableProduct) {
+                showToast("Parent product not found. Refresh inventory and try again.", true);
+                return;
+            }
+            openProductModal(editableProduct);
+        });
     } catch (error) {
         closeProductModal();
         showToast(error.message, true);
@@ -3030,7 +3151,7 @@ function openContactModal(route, record = null) {
         <button class="modal-close" type="button" data-close-business aria-label="Close dialog">×</button></div>
         <form id="contact-form" data-route="${route}" data-id="${record?.id || ""}" novalidate>
             <div class="form-grid">
-                <div class="form-group full"><label for="contact-name">${isCustomer ? "Name" : "Company name"}</label><input class="form-field" id="contact-name" name="name" maxlength="160" required placeholder="${isCustomer ? "" : "e.g. Unilever Philippines, Inc."}" value="${escapeHtml(record?.name || "")}"></div>
+                <div class="form-group full"><label for="contact-name">${isCustomer ? "Name" : "Company name"}</label><input class="form-field" id="contact-name" name="name" maxlength="160" required placeholder="${isCustomer ? "" : "e.g. Unilever Philippines, Inc."}" value="${escapeHtml(record?.name || "")}">                </div>
                 <div class="form-group"><label for="contact-email">Email</label><input class="form-field" id="contact-email" name="email" type="email" maxlength="190" value="${escapeHtml(record?.email || "")}"></div>
                 ${isCustomer ? `<div class="form-group"><label for="contact-phone">Phone</label><input class="form-field" id="contact-phone" name="phone" maxlength="40" value="${escapeHtml(record?.phone || "")}"></div>` : ""}
                 <div class="form-group full"><label for="contact-address">Address</label><input class="form-field" id="contact-address" name="address" maxlength="500" value="${escapeHtml(record?.address || "")}"></div>
@@ -3048,7 +3169,7 @@ function openContactModal(route, record = null) {
 
 function documentItemRow(route, item = {}) {
     const purchase = route === "purchases";
-    const productOptions = businessProducts.map((product) => `<option value="${product.id}" ${String(product.id) === String(item.product_id || "") ? "selected" : ""}>${escapeHtml(product.product_name)} · ${Number(product.quantity)} in stock · ${money(product.price)}</option>`).join("");
+    const productOptions = businessProducts.map((product) => `<option value="${product.id}" ${String(product.id) === String(item.product_id || "") ? "selected" : ""}>${escapeHtml(product.display_name || product.product_name)} · ${Number(product.quantity)} in stock · ${money(product.price)}</option>`).join("");
     const selected = businessProducts.find((product) => String(product.id) === String(item.product_id || ""));
     const cost = item.unit_cost ?? item.unit_price ?? selected?.price ?? "";
     return `<div class="document-item-row">
@@ -3489,9 +3610,12 @@ app.addEventListener("click", async (event) => {
     }
     if (addCartButton) {
         const id = addCartButton.dataset.cartAdd;
-        const product = shopProducts.find((item) => String(item.id) === id);
-        if (product && Number(shopCart[id] || 0) < Number(product.quantity)) {
-            shopCart[id] = Number(shopCart[id] || 0) + 1;
+        const variants = shopProducts.filter((item) => String(item.parent_product_id || item.id) === id);
+        const product = variants.find((item) => Number(item.quantity) > 0);
+        if (variants.length > 1) {
+            showProductDetails(id);
+        } else if (product && Number(shopCart[product.id] || 0) < Number(product.quantity)) {
+            shopCart[product.id] = Number(shopCart[product.id] || 0) + 1;
             saveShopCart();
             renderShop();
         }
@@ -3509,6 +3633,7 @@ app.addEventListener("click", async (event) => {
     const viewButton = event.target.closest("[data-view]");
     const editButton = event.target.closest("[data-edit]");
     const deleteButton = event.target.closest("[data-delete]");
+    const deleteVariantButton = event.target.closest("[data-delete-variant]");
     const retryButton = event.target.closest("[data-retry]");
     const retryBusinessButton = event.target.closest("[data-retry-business]");
     const createContactButton = event.target.closest("[data-create-contact]");
@@ -3546,6 +3671,19 @@ app.addEventListener("click", async (event) => {
         if (product) openProductModal(product);
     }
     if (deleteButton) deleteProduct(deleteButton.dataset.delete);
+    if (deleteVariantButton && await confirmAction("Remove this variant? It must have no stock or transaction history.", {
+        title: "Remove product option",
+        confirmLabel: "Remove",
+        danger: true
+    })) {
+        try {
+            await request(`${API_PRODUCTS}/${encodeURIComponent(deleteVariantButton.dataset.deleteVariant)}/variants/${encodeURIComponent(deleteVariantButton.dataset.variantId)}`, { method: "DELETE" });
+            showToast("Product option removed.");
+            await loadProducts();
+        } catch (error) {
+            showToast(error.message, true);
+        }
+    }
     if (createContactButton) openContactModal(currentRoute());
     if (editContactButton) {
         const record = businessData.find((item) => String(item.id) === editContactButton.dataset.editContact);

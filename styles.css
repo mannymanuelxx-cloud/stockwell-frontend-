@@ -694,6 +694,16 @@ tbody tr:hover { background: #fafbf8; }
     .attention-section { align-items: flex-start; }
 }
 
+.product-variant-editor { margin: 18px 0; padding: 16px; }
+.product-variant-editor h3 { margin: 0 0 6px; color: var(--navy); font-size: 15px; }
+.product-variant-list, .product-variant-new-list { display: grid; gap: 8px; margin: 12px 0; }
+.product-variant-row, .product-variant-new-row { display: grid; grid-template-columns: repeat(3, minmax(100px, 1fr)) auto auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; }
+.product-variant-row small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.product-variant-new-row { grid-template-columns: repeat(4, minmax(100px, 1fr)) auto; }
+@media (max-width: 700px) {
+    .product-variant-row, .product-variant-new-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .module-toolbar {
     display: flex;
     align-items: center;
